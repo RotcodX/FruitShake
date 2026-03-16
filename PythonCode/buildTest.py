@@ -12,6 +12,8 @@ try:
     _HAS_PIL = True
 except Exception:
     _HAS_PIL = False
+import faulthandler
+faulthandler.enable()
 
 # -------------------------
 # Config / paths
@@ -1093,7 +1095,7 @@ class FruitSelectionScreen(tk.Frame):
         self.next_zone = (880, 520, 1020, 580)
         back_rect = self.canvas.create_rectangle(*self.back_zone, outline="")
         next_rect = self.canvas.create_rectangle(*self.next_zone, outline="")
-        self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: controller.log("Back pressed on FruitSelection") or controller.show_frame(WelcomeScreen, pause=True))
+        self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: controller.log("Back pressed on FruitSelection") or controller.show_frame(WelcomeScreen))
         self.canvas.tag_bind(next_rect, "<Button-1>", lambda e: controller.log("Next pressed on FruitSelection") or self.on_next())
 
         # summary bar (use reusable SummaryBar, centered)
@@ -1105,6 +1107,46 @@ class FruitSelectionScreen(tk.Frame):
 
         # selected highlight overlay tag
         self.sel_overlay_tag = "sel_overlay"
+
+        # -----------------------
+        # PRELOAD small overlay images into a cache to avoid heavy Image.open / PhotoImage
+        # -----------------------
+        # cache keys: (fruit_key, "best") and (fruit_key, "stock")
+        self._overlay_cache = {}
+        # Optional quick disable if you want to check if overlays are the cause:
+        self._disable_overlays = False
+
+        try:
+            for key, (x1, y1, x2, y2) in self.fruit_zones.items():
+                meta = self.controller.catalog.get(key, {})
+                asset_base = meta.get("asset_name")
+                if not asset_base:
+                    continue
+                zone_w = max(1, x2 - x1)
+                zone_h = max(1, y2 - y1)
+
+                # filenames you use in update_overlays:
+                for suffix, cache_tag in (("BestSeller.png", "best"), ("Stock.png", "stock")):
+                    fname = f"{asset_base}{suffix}"
+                    if file_exists(fname):
+                        try:
+                            # load once and resize to zone size where appropriate
+                            pil = Image.open(os.path.join(ASSETS_DIR, fname))
+                            # if overlay is full-screen we keep original size (it will be placed at 0,0)
+                            if pil.size == (SCREEN_W, SCREEN_H):
+                                photo = ImageTk.PhotoImage(pil)
+                            else:
+                                # resize down to the fruit zone - this saves memory on Pi
+                                pil_r = pil.resize((zone_w, zone_h), Image.LANCZOS)
+                                photo = ImageTk.PhotoImage(pil_r)
+                            self._overlay_cache[(key, cache_tag)] = photo
+                        except Exception as e:
+                            # log but continue — if this fails, update_overlays will skip gracefully
+                            self.controller.log(f"Preload overlay failed for {fname}: {e}")
+        except Exception as e:
+            # be defensive: if preload crashes, continue without cache
+            self.controller.log(f"Overlay preload error: {e}")
+            self._overlay_cache = {}
 
     def tkraise(self, *args, **kwargs):
         super().tkraise(*args, **kwargs)
@@ -1146,11 +1188,21 @@ class FruitSelectionScreen(tk.Frame):
             if key in self.controller.selected_fruits:
                 # draw a yellow rectangle inset to indicate selection
                 self.canvas.create_rectangle(x1+4, y1+4, x2-4, y2-4, outline="yellow", width=4, tags=(self.sel_overlay_tag,))
-
+    
     def update_overlays(self):
         """
         Draw (or remove) overlay PNGs for best-seller / out-of-stock items.
+        Uses preloaded images when possible to avoid heavy allocations on each call.
         """
+        # If overlays disabled, clear any existing and return
+        if getattr(self, "_disable_overlays", False):
+            for items in list(self.overlay_items.values()):
+                for it in items:
+                    safe_delete(self.canvas, it)
+            self.overlay_items.clear()
+            self.overlay_refs.clear()
+            return
+
         # delete previous overlays
         for items in self.overlay_items.values():
             for it in items:
@@ -1171,52 +1223,76 @@ class FruitSelectionScreen(tk.Frame):
             item_ids = []
             photo_refs = []
 
-            # helper to load and place, with full-screen detection
-            def place_overlay(filename):
-                path = os.path.join(ASSETS_DIR, filename)
+            def _place_from_photo(photo, full_screen=False):
                 try:
-                    pil_img = Image.open(path)
+                    if full_screen:
+                        item = self.canvas.create_image(0, 0, anchor="nw", image=photo)
+                    else:
+                        item = self.canvas.create_image(center_x, center_y, anchor="center", image=photo)
+                    # Make overlay non-interactive so clicks pass through to zone rects underneath
+                    try:
+                        self.canvas.itemconfigure(item, state="disabled")
+                    except Exception:
+                        pass
+                    return item
                 except Exception as e:
-                    self.controller.log(f"Failed to open overlay image {filename}: {e}")
-                    return None, None
-                w, h = pil_img.size
-                photo = ImageTk.PhotoImage(pil_img)
-                # decide anchor/position
-                if (w, h) == (SCREEN_W, SCREEN_H):
-                    # full-screen overlay: place at top-left so PNG can include its own positioning
-                    item = self.canvas.create_image(0, 0, anchor="nw", image=photo)
-                else:
-                    # smaller overlay -> center on fruit zone
-                    item = self.canvas.create_image(center_x, center_y, anchor="center", image=photo)
-                # Make overlay non-interactive so clicks pass through to zone rects underneath
-                try:
-                    self.canvas.itemconfigure(item, state="disabled")
-                except Exception:
-                    pass
-                return item, photo
+                    self.controller.log(f"Canvas create_image failed: {e}")
+                    return None
 
             # best seller (uses computed flag meta.get('best_seller'))
             if meta.get("best_seller", False):
-                best_filename = f"{asset_base}BestSeller.png"
-                if file_exists(best_filename):
-                    item, photo = place_overlay(best_filename)
+                # try cache first
+                photo = self._overlay_cache.get((key, "best"))
+                if photo is not None:
+                    item = _place_from_photo(photo, full_screen=(photo.width() == SCREEN_W and photo.height() == SCREEN_H))
                     if item:
-                        item_ids.append(item)
-                        photo_refs.append(photo)
+                        item_ids.append(item); photo_refs.append(photo)
+                else:
+                    # fallback: try load on demand but keep it safe
+                    fname = f"{asset_base}BestSeller.png"
+                    if file_exists(fname):
+                        try:
+                            img = Image.open(os.path.join(ASSETS_DIR, fname))
+                            if img.size == (SCREEN_W, SCREEN_H):
+                                photo = ImageTk.PhotoImage(img)
+                                item = _place_from_photo(photo, full_screen=True)
+                            else:
+                                w = x2 - x1; h = y2 - y1
+                                photo = ImageTk.PhotoImage(img.resize((w,h), Image.LANCZOS))
+                                item = _place_from_photo(photo, full_screen=False)
+                            if item:
+                                item_ids.append(item); photo_refs.append(photo)
+                        except Exception as e:
+                            self.controller.log(f"Failed to load best-seller image {fname}: {e}")
 
-            # out of stock (draw on top of best seller when present) if stock <= 0
+            # out of stock (draw on top of best seller when present)
             if meta.get("stock", 0) <= 0:
-                stock_filename = f"{asset_base}Stock.png"
-                if file_exists(stock_filename):
-                    item, photo = place_overlay(stock_filename)
+                photo = self._overlay_cache.get((key, "stock"))
+                if photo is not None:
+                    item = _place_from_photo(photo, full_screen=(photo.width() == SCREEN_W and photo.height() == SCREEN_H))
                     if item:
-                        item_ids.append(item)
-                        photo_refs.append(photo)
+                        item_ids.append(item); photo_refs.append(photo)
+                else:
+                    fname = f"{asset_base}Stock.png"
+                    if file_exists(fname):
+                        try:
+                            img = Image.open(os.path.join(ASSETS_DIR, fname))
+                            if img.size == (SCREEN_W, SCREEN_H):
+                                photo = ImageTk.PhotoImage(img)
+                                item = _place_from_photo(photo, full_screen=True)
+                            else:
+                                w = x2 - x1; h = y2 - y1
+                                photo = ImageTk.PhotoImage(img.resize((w,h), Image.LANCZOS))
+                                item = _place_from_photo(photo, full_screen=False)
+                            if item:
+                                item_ids.append(item); photo_refs.append(photo)
+                        except Exception as e:
+                            self.controller.log(f"Failed to load stock image {fname}: {e}")
 
             if item_ids:
                 self.overlay_items[key] = item_ids
                 self.overlay_refs[key] = photo_refs
-
+   
     def render_summary(self):
         """Render summary into the SummaryBar (centered)."""
         parts = []
