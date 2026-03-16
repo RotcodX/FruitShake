@@ -1,21 +1,232 @@
 # buildTest.py
 import tkinter as tk
 import tkinter.font as tkfont
-from PIL import Image, ImageTk
 import os
 from decimal import Decimal, ROUND_HALF_UP
 import time
 from playsound import playsound
 import simpleaudio as sa
 import math
+try:
+    from PIL import Image, ImageDraw, ImageFont, ImageTk
+    _HAS_PIL = True
+except Exception:
+    _HAS_PIL = False
 
 # -------------------------
 # Config / paths
 # -------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+FONT_INTER = os.path.join(ASSETS_DIR, "Inter", "static", "Inter_28pt-ExtraBold.ttf")
+SCREEN_W, SCREEN_H = 1024, 600 
 
-SCREEN_W, SCREEN_H = 1024, 600
+class AdminPanel(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg="#222", bd=4, relief="raised")
+        self.controller = controller
+
+        self.place(relx=0.5, rely=0.5, anchor="center")
+        self.place_forget()  # hidden by default
+
+        self.build_ui()
+
+class OutlinedText:
+    def __init__(self, canvas, x, y, text="", font=("Arial", 24), fill="#FFF",
+                 stroke=1, stroke_fill="#000", shadow=None, mode="pillow",
+                 anchor="center", tag=None, pillow_font_path=FONT_INTER):
+        self.canvas = canvas
+        self.x = x
+        self.y = y
+        self.text = str(text)
+        self.font = font
+        self.fill = fill
+        self.stroke = int(stroke or 0)
+        self.stroke_fill = stroke_fill
+        self.shadow = shadow
+        self.anchor = anchor
+        self.tag = tag
+        # choose mode (fall back to canvas if Pillow missing)
+        if mode == "pillow" and not _HAS_PIL:
+            mode = "canvas"
+        self.mode = mode
+        self.pillow_font_path = pillow_font_path
+        self._ids = []      # canvas item ids (for canvas-mode) or [image_id] for pillow-mode
+        self._photo = None  # hold PhotoImage for pillow mode
+        self._pillow_font = None
+        if self.mode == "pillow":
+            self._prepare_pillow_font()
+            self._render_pillow()
+        else:
+            self._render_canvas()
+
+    # Pillow font loader
+    def _prepare_pillow_font(self):
+        if not _HAS_PIL:
+            return
+
+        # determine requested size
+        size = int(self.font[1]) if isinstance(self.font, (list, tuple)) and len(self.font) >= 2 else 24
+
+        # 1) If user provided a direct path, try that first and log
+        if self.pillow_font_path:
+            try:
+                self._pillow_font = ImageFont.truetype(self.pillow_font_path, size)
+                print(f"[OutlinedText] Loaded pillow font from explicit path: {self.pillow_font_path} size={size}")
+                return
+            except Exception as e:
+                print(f"[OutlinedText] Failed to load pillow_font_path '{self.pillow_font_path}': {e}")
+                # fallthrough to attempt to find similar filenames in same dir
+
+        # 2) Try to resolve family name (e.g. "Inter") to some local file
+        fam = None
+        if isinstance(self.font, (list, tuple)) and len(self.font) >= 1:
+            fam = str(self.font[0])
+
+        # If family present, try a few predictable filenames or scan same folder as pillow_font_path
+        if fam:
+            # try simple family.ttf first
+            candidates = [f"{fam}.ttf", f"{fam}.TTF", f"{fam}.otf"]
+            for cand in candidates:
+                try:
+                    self._pillow_font = ImageFont.truetype(cand, size)
+                    print(f"[OutlinedText] Loaded pillow font by candidate name: {cand} size={size}")
+                    return
+                except Exception:
+                    pass
+
+            # If user gave pillow_font_path earlier (but failed), search that directory for files containing fam
+            if self.pillow_font_path:
+                try:
+                    d = os.path.dirname(self.pillow_font_path)
+                    if d and os.path.isdir(d):
+                        for fname in os.listdir(d):
+                            if fam.lower() in fname.lower() and fname.lower().endswith((".ttf", ".otf")):
+                                fp = os.path.join(d, fname)
+                                try:
+                                    self._pillow_font = ImageFont.truetype(fp, size)
+                                    print(f"[OutlinedText] Loaded pillow font by scanning dir: {fp} size={size}")
+                                    return
+                                except Exception as e:
+                                    print(f"[OutlinedText] Tried {fp} but failed: {e}")
+                except Exception as e:
+                    print(f"[OutlinedText] Dir-scan for family fonts failed: {e}")
+
+        # 3) Last resort: try truetype by family (may or may not exist on system)
+        try:
+            if fam:
+                self._pillow_font = ImageFont.truetype(fam, size)
+                print(f"[OutlinedText] Loaded pillow font by family name: {fam} size={size}")
+                return
+        except Exception as e:
+            print(f"[OutlinedText] truetype by family '{fam}' failed: {e}")
+
+        # 4) fallback to default and log how bad it will look
+        print("[OutlinedText] Falling back to ImageFont.load_default() (tiny font).")
+        self._pillow_font = ImageFont.load_default()
+
+    # Pillow render (makes PhotoImage and places on canvas)
+    def _render_pillow(self):
+        if not _HAS_PIL:
+            return self._render_canvas()
+        if self._pillow_font is None:
+            self._prepare_pillow_font()
+
+        font = self._pillow_font
+        stroke_w = max(0, int(self.stroke or 0))
+        # measure text
+        dummy = Image.new("RGBA", (1,1), (0,0,0,0))
+        draw = ImageDraw.Draw(dummy)
+        try:
+            bbox = draw.textbbox((0,0), self.text, font=font, stroke_width=stroke_w)
+            w = bbox[2] - bbox[0]; h = bbox[3] - bbox[1]
+        except Exception:
+            w, h = draw.textsize(self.text, font=font)
+        pad = stroke_w + 4
+        sx = pad; sy = pad
+        if self.shadow:
+            sx += abs(self.shadow[0]); sy += abs(self.shadow[1])
+        W = max(1, w + pad*2 + 2); H = max(1, h + pad*2 + 2)
+        img = Image.new("RGBA", (W, H), (0,0,0,0))
+        draw = ImageDraw.Draw(img)
+        if self.shadow:
+            dx, dy, scol = self.shadow
+            draw.text((sx+dx, sy+dy), self.text, font=font, fill=scol)
+        draw.text((sx, sy), self.text, font=font, fill=self.fill,
+                  stroke_width=stroke_w, stroke_fill=self.stroke_fill)
+        self._photo = ImageTk.PhotoImage(img)
+        # anchor adjustments (center, nw, etc.)
+        ax, ay = 0, 0
+        if self.anchor == "center":
+            ax = W//2; ay = H//2
+        elif self.anchor == "n":
+            ax = W//2; ay = 0
+        elif self.anchor == "s":
+            ax = W//2; ay = H
+        elif self.anchor == "e":
+            ax = W; ay = H//2
+        elif self.anchor == "w":
+            ax = 0; ay = H//2
+        canvas_x = int(self.x - ax); canvas_y = int(self.y - ay)
+        if not self._ids:
+            img_id = self.canvas.create_image(canvas_x, canvas_y, anchor="nw", image=self._photo, tags=self.tag)
+            self._ids = [img_id]
+        else:
+            self.canvas.coords(self._ids[0], canvas_x, canvas_y)
+            self.canvas.itemconfigure(self._ids[0], image=self._photo)
+
+    # Canvas-mode render (draw multiple text items to fake stroke)
+    def _render_canvas(self):
+        for cid in self._ids:
+            try: self.canvas.delete(cid)
+            except Exception: pass
+        self._ids = []
+        if self.shadow:
+            dx, dy, scol = self.shadow
+            sid = self.canvas.create_text(self.x+dx, self.y+dy, text=self.text, font=self.font, fill=scol, anchor=self.anchor, tags=self.tag)
+            self._ids.append(sid)
+        sw = max(1, int(self.stroke or 0))
+        offsets = []
+        r = sw
+        for ox in range(-r, r+1):
+            for oy in range(-r, r+1):
+                if ox == 0 and oy == 0:
+                    continue
+                offsets.append((ox, oy))
+        offsets = list({(ox, oy) for (ox, oy) in offsets})
+        for ox, oy in offsets:
+            iid = self.canvas.create_text(self.x+ox, self.y+oy, text=self.text, font=self.font, fill=self.stroke_fill, anchor=self.anchor, tags=self.tag)
+            self._ids.append(iid)
+        mid = self.canvas.create_text(self.x, self.y, text=self.text, font=self.font, fill=self.fill, anchor=self.anchor, tags=self.tag)
+        self._ids.append(mid)
+
+    # update API
+    def update(self, text=None, fill=None, stroke=None, stroke_fill=None, shadow=None, font=None):
+        changed = False
+        if text is not None:
+            self.text = str(text); changed = True
+        if fill is not None:
+            self.fill = fill; changed = True
+        if stroke is not None:
+            self.stroke = int(stroke); changed = True
+        if stroke_fill is not None:
+            self.stroke_fill = stroke_fill; changed = True
+        if shadow is not None:
+            self.shadow = shadow; changed = True
+        if font is not None:
+            self.font = font; self._pillow_font = None; changed = True
+        if changed:
+            if self.mode == "pillow":
+                self._render_pillow()
+            else:
+                self._render_canvas()
+
+    def destroy(self):
+        for cid in self._ids:
+            try: self.canvas.delete(cid)
+            except Exception: pass
+        self._ids = []
+        self._photo = None
 
 class TouchFeedbackManager:
     def __init__(self, app, sound_filename="tap.wav"):
@@ -101,19 +312,129 @@ def amount_str(amount):
 # SummaryBar widget
 # -------------------------
 class SummaryBar(tk.Frame):
-    """Reusable centered summary bar (single label) to place on screens that need it."""
-    def __init__(self, parent, width=800, height=48, **kwargs):
+    def __init__(
+        self,
+        parent,
+        x: int | None = None,
+        y: int | None = None,
+        width: int = 800,
+        height: int = 48,
+        *,
+        parent_canvas: tk.Canvas | None = None,
+        font: tuple = ("Inter", 15),
+        fill: str = "#FFC98B",
+        stroke: int = 2,
+        stroke_fill: str = "#FF1249",
+        shadow: tuple | None = None,
+        mode: str = "pillow",
+        pillow_font_path=FONT_INTER,
+        anchor: str = "center",
+        **kwargs
+    ):
+        # keep frame size so existing .place(...) calls continue to work
         super().__init__(parent, width=width, height=height, **kwargs)
-        # keep consistent dimensions and centered placement is handled by parent
-        self.var = tk.StringVar()
-        self.label = tk.Label(self, textvariable=self.var, font=("Arial", 12), anchor="center", justify="center")
-        self.label.pack(fill="both", expand=True)
+
+        # choose the canvas we'll draw on:
+        # priority: explicit parent_canvas param -> parent's canvas attribute -> None
+        self.parent = parent
+        self.canvas = parent_canvas if parent_canvas is not None else getattr(parent, "canvas", None)
+
+        # store placement and sizing
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.anchor = anchor
+
+        # style args to forward to OutlinedText
+        self._ot_kwargs = dict(
+            font=font,
+            fill=fill,
+            stroke=stroke,
+            stroke_fill=stroke_fill,
+            shadow=shadow,
+            mode=mode,
+            pillow_font_path=pillow_font_path,
+            anchor="center",
+        )
+
+        # decide which drawing mode to use
+        self._use_parent_canvas = (self.canvas is not None and self.x is not None and self.y is not None)
+
+        # internal references
+        self._outlined_text = None
+        self._inner_canvas = None
+        self._tag = f"summarybar_{id(self)}"
+
+        if self._use_parent_canvas:
+            # draw directly on the provided canvas at (x,y) -> true transparency
+            try:
+                self._outlined_text = OutlinedText(
+                    self.canvas,
+                    self.x,
+                    self.y,
+                    text="",
+                    tag=self._tag,
+                    **self._ot_kwargs
+                )
+            except Exception as e:
+                # fallback: create a tiny internal canvas
+                print(f"[SummaryBar] Failed to initialize parent-canvas OutlinedText: {e}")
+                self._use_parent_canvas = False
+
+        if not self._use_parent_canvas:
+            # create an internal canvas to render text (not truly transparent)
+            bg = self.cget("bg")
+            self._inner_canvas = tk.Canvas(self, width=self.width, height=self.height, highlightthickness=0, bg=bg)
+            self._inner_canvas.pack(fill="both", expand=True)
+            # center coords inside the inner canvas
+            cx = self.width // 2
+            cy = self.height // 2
+            self._outlined_text = OutlinedText(
+                self._inner_canvas,
+                cx,
+                cy,
+                text="",
+                tag=self._tag,
+                **self._ot_kwargs
+            )
 
     def set_text(self, text: str):
-        self.var.set(text)
+        """Update the displayed text (keeps the underlying OutlinedText instance)."""
+        if not self._outlined_text:
+            # defensive: create a simple label fallback
+            for w in self.winfo_children():
+                w.destroy()
+            lbl = tk.Label(self, text=text, font=self._ot_kwargs.get("font", ("Arial", 12)), anchor="center", justify="center")
+            lbl.pack(fill="both", expand=True)
+            return
+
+        try:
+            # OutlinedText exposes update(...) — use it so we don't recreate images each update
+            self._outlined_text.update(text=text)
+        except Exception:
+            # as a fallback, call update with the string
+            try:
+                self._outlined_text.update(text=str(text))
+            except Exception as e:
+                print(f"[SummaryBar] Failed to update outlined text: {e}")
 
     def clear(self):
-        self.var.set("")
+        """Clear text."""
+        self.set_text("")
+
+    def set_parent_position(self, x: int, y: int):
+        """If using parent-canvas mode, move the text position."""
+        self.x = x
+        self.y = y
+        if self._use_parent_canvas and self._outlined_text:
+            # OutlinedText stores its coordinates; update by re-rendering
+            try:
+                self._outlined_text.x = x
+                self._outlined_text.y = y
+                self._outlined_text.update(text=self._outlined_text.text)
+            except Exception:
+                pass
 
 # -------------------------
 # Application
@@ -381,7 +702,7 @@ class WelcomeScreen(tk.Frame):
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
         # full-screen binding (tapping anywhere starts) — use a real handler
-        self.canvas.bind("<Button-1>", self.on_welcome_click)
+        self.canvas.bind("<Button-1>", self.on_screen_click)
 
         # --- Admin: hidden touch zone (top-right 100x100) ---
         x1, y1 = SCREEN_W - 100, 0
@@ -403,33 +724,109 @@ class WelcomeScreen(tk.Frame):
         self.admin_panel_visible = False
 
     def _build_admin_ui(self):
-        """Populate the admin panel with a simple dashboard showing stock/sales + controls."""
+        """Populate the admin panel with stock/sales rows and admin controls."""
         panel = self.admin_panel
+
+        # Clear any previous widgets (safe to call multiple times)
+        for w in panel.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
         # Title
         title = tk.Label(panel, text="ADMIN PANEL", font=("Arial", 18, "bold"), bg="#222", fg="white")
         title.place(relx=0.5, y=12, anchor="n")
 
-        # Close button
+        # Close button (hide admin)
         close_btn = tk.Button(panel, text="Close", command=self.toggle_admin)
-        close_btn.place(x=panel.winfo_reqwidth() - 80, y=10, width=60, height=28, anchor="ne")
+        close_btn.place(x=panel.winfo_reqwidth() - 15, y=5, width=60, height=28, anchor="ne")
+        # Exit button (closes app)
+        exit_btn = tk.Button(panel, text="Exit", command=lambda: self.controller.destroy())
+        exit_btn.place(x=panel.winfo_reqwidth() - 15, y=panel.winfo_reqheight() - 15, anchor="se")
 
-        # Create a container for the fruit rows (scrolling is optional; keep simple)
+        # Fullscreen toggle
+        def _toggle_fullscreen():
+            try:
+                new_state = not getattr(self.controller, "is_fullscreen", False)
+                try:
+                    self.controller.attributes("-fullscreen", new_state)
+                except Exception:
+                    try:
+                        self.controller.attributes("-zoomed", new_state)
+                    except Exception:
+                        pass
+                self.controller.is_fullscreen = new_state
+                self._fs_btn.config(text="Fullscreen: ON" if new_state else "Fullscreen: OFF")
+            except Exception as e:
+                self.controller.log(f"Failed to toggle fullscreen: {e}")
+
+        self._fs_btn = tk.Button(panel, text=("Fullscreen: ON" if getattr(self.controller, "is_fullscreen", False) else "Fullscreen: OFF"), command=_toggle_fullscreen)
+        self._fs_btn.place(x=5, y=5, anchor="nw")
+
+        # Admin rows area (where each fruit/add-on row will be shown)
         rows_frame = tk.Frame(panel, bg="#222")
-        rows_frame.place(relx=0.5, rely=0.12, anchor="n", relwidth=0.96, relheight=0.75)
+        rows_frame.place(relx=0.5, rely=0.12, anchor="n", relwidth=0.96, relheight=0.78)
 
-        # we'll store the dynamic row widgets so we can refresh them
+        # store the parent so _refresh_admin_rows can populate into it
         self.admin_rows_parent = rows_frame
-        self._refresh_admin_rows()
 
-    def on_welcome_click(self, event):
-        # ignore taps while admin panel is visible (prevent accidental nav that hides admin)
-        if getattr(self, "admin_panel_visible", False):
-            self.controller.log("Welcome tapped but admin panel visible — ignoring")
-            return "break"
+        # Try to populate rows using your existing helper (keeps single source of truth)
+        if hasattr(self, "_refresh_admin_rows"):
+            try:
+                self._refresh_admin_rows()
+            except Exception as e:
+                self.controller.log(f"Welcome: _refresh_admin_rows() error: {e}")
+                # fallback display if the helper exists but fails
+                for w in rows_frame.winfo_children():
+                    w.destroy()
+                tk.Label(rows_frame, text="(admin refresh failed)", bg="#222", fg="white").pack()
         else:
-            self.controller.log("Welcome tapped")
-            # leaving welcome will let show_frame restore the standard inactivity timeout
-            self.controller.show_frame(FruitSelectionScreen)
+            # No helper found: create a minimal interactive fallback
+            for w in rows_frame.winfo_children():
+                w.destroy()
+
+            def make_row(parent, row_idx, label_text, stock_val_getter, change_fn):
+                r = tk.Frame(parent, bg="#222")
+                r.grid_rowconfigure(0, weight=1)
+                r.grid_columnconfigure(0, weight=1)
+                r.grid(row=row_idx, column=0, sticky="ew", pady=2)
+
+                lbl = tk.Label(r, text=label_text, bg="#222", fg="white", anchor="w")
+                lbl.pack(side="left", padx=6)
+
+                stock_var = tk.StringVar(value=str(stock_val_getter()))
+                stock_label = tk.Label(r, textvariable=stock_var, bg="#222", fg="white", width=6)
+                stock_label.pack(side="left", padx=6)
+
+                def on_change(delta):
+                    try:
+                        change_fn(delta)
+                        stock_var.set(str(stock_val_getter()))
+                    except Exception as e:
+                        self.controller.log(f"Admin change error: {e}")
+
+                minus = tk.Button(r, text="-", command=lambda: on_change(-1))
+                minus.pack(side="left")
+                plus = tk.Button(r, text="+", command=lambda: on_change(1))
+                plus.pack(side="left")
+
+            # populate fruits
+            row = 0
+            catalog = getattr(self.controller, "catalog", {})
+            for k, info in catalog.items():
+                name = info.get("name", k)
+                make_row(rows_frame, row, f"{name} (fruit)", lambda info=info: int(info.get("stock", 0)),
+                         lambda d, info=info: info.__setitem__("stock", max(0, int(info.get("stock", 0)) + d)))
+                row += 1
+
+            # populate addons
+            addons = getattr(self.controller, "addons", {})
+            for k, info in addons.items():
+                name = info.get("name", k)
+                make_row(rows_frame, row, f"{name} (add-on)", lambda info=info: int(info.get("stock", 0)),
+                         lambda d, info=info: info.__setitem__("stock", max(0, int(info.get("stock", 0)) + d)))
+                row += 1
 
     def on_admin_zone_click(self, event):
         # toggle admin panel and STOP further event propagation so the canvas-wide handler won't run
@@ -624,10 +1021,17 @@ class WelcomeScreen(tk.Frame):
             self.admin_panel_visible = True
             self.controller.log("Admin panel shown")
 
+    def on_screen_click(self, event):
+        # ignore taps while admin panel is visible (prevent accidental nav that hides admin)
+        if getattr(self, "admin_panel_visible", False):
+            self.controller.log("Screen tapped but admin panel visible — ignoring")
+            return "break"
+        else:
+            self.controller.log("Screen tapped")
+            # leaving welcome will let show_frame restore the standard inactivity timeout
+            self.controller.show_frame(FruitSelectionScreen)
+
     def tkraise(self, *args, **kwargs):
-        """Welcome special: always hide admin when leaving/welcome re-shown if needed.
-           Also pause inactivity while on Welcome so admin won't disappear due to a timeout firing.
-        """
         super().tkraise(*args, **kwargs)
         # hide admin when welcome shown by default
         if self.admin_panel_visible:
@@ -693,8 +1097,7 @@ class FruitSelectionScreen(tk.Frame):
         self.canvas.tag_bind(next_rect, "<Button-1>", lambda e: controller.log("Next pressed on FruitSelection") or self.on_next())
 
         # summary bar (use reusable SummaryBar, centered)
-        self.summary = SummaryBar(self, width=800, height=48)
-        self.summary.place(relx=0.5, y=550, anchor="n")
+        self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
 
         # overlay images (stock/bestseller) - keep references so PhotoImage doesn't GC
         self.overlay_refs = {}        # key -> list of PhotoImage refs
@@ -821,6 +1224,7 @@ class FruitSelectionScreen(tk.Frame):
             parts.append("Fruits: " + ", ".join(self.controller.catalog[k]["name"] for k in self.controller.selected_fruits))
         if self.controller.selected_addons:
             parts.append("Add-ons: " + ", ".join(self.controller.addons[k]["name"] for k in self.controller.selected_addons))
+        parts.append("Total: " + money_str(self.controller.calculate_total()))
         summary_text = " | ".join(parts) if parts else "No items selected"
         # Update the reusable SummaryBar
         self.summary.set_text(summary_text)
@@ -859,11 +1263,10 @@ class AddOnScreen(tk.Frame):
         back_rect = self.canvas.create_rectangle(20, 520, 140, 580, outline="")
         next_rect = self.canvas.create_rectangle(880, 520, 1020, 580, outline="")
         self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: controller.log("Back pressed on AddOn") or controller.show_frame(FruitSelectionScreen))
-        self.canvas.tag_bind(next_rect, "<Button-1>", lambda e: controller.log("Next pressed on AddOn") or controller.show_frame(SummaryScreen))
+        self.canvas.tag_bind(next_rect, "<Button-1>", lambda e: controller.log("Next pressed on AddOn") or controller.show_frame(SummaryScreen, timeout_ms=self.controller.default_timeout_ms * 5))
 
         # SummaryBar for this screen
-        self.summary = SummaryBar(self, width=800, height=48)
-        self.summary.place(relx=0.5, y=550, anchor="n")
+        self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
 
         # tag name used for selection highlight overlays
         self.sel_overlay_tag = "addon_sel_overlay"
@@ -918,6 +1321,7 @@ class AddOnScreen(tk.Frame):
             parts.append("Fruits: " + ", ".join(self.controller.catalog[k]["name"] for k in self.controller.selected_fruits))
         if self.controller.selected_addons:
             parts.append("Add-ons: " + ", ".join(self.controller.addons[k]["name"] for k in self.controller.selected_addons))
+        parts.append("Total: " + money_str(self.controller.calculate_total()))
         summary_text = " | ".join(parts) if parts else "No items selected"
         self.summary.set_text(summary_text)
 
@@ -943,7 +1347,7 @@ class SummaryScreen(tk.Frame):
         back_rect = self.canvas.create_rectangle(20, 520, 140, 580, outline="")
         next_rect = self.canvas.create_rectangle(880, 520, 1020, 580, outline="")
         self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: self.controller.log("Back pressed on Summary") or self.controller.show_frame(AddOnScreen))
-        self.canvas.tag_bind(next_rect, "<Button-1>", lambda e: self.controller.log("Next pressed on Summary") or self.controller.show_frame(PaymentSelectionScreen))
+        self.canvas.tag_bind(next_rect, "<Button-1>", lambda e: self.controller.log("Next pressed on Summary") or self.controller.show_frame(PaymentSelectionScreen, timeout_ms=self.controller.default_timeout_ms * 5))
 
         # choose font: use Inter if installed, otherwise fallback to Arial
         available_fonts = list(tkfont.families())
@@ -954,25 +1358,30 @@ class SummaryScreen(tk.Frame):
 
         # Canvas text items for the summary (multi-line) and the price
         # width controls wrapping; anchor="n" places top-center at the given y
-        self.items_text_id = self.canvas.create_text(
-            SCREEN_W / 2,           # x center
-            160,                    # y position (top of the summary block)
-            text="", 
-            font=(title_font_name, 20), 
-            fill="#000000",         # your Inter title color example; change if needed
-            anchor="n", 
-            justify="center",
-            width=760               # wrap width, tweak to match your design
+        self.items_text_id = OutlinedText(
+            self.canvas,
+            SCREEN_W // 2, 230,
+            text="",
+            font=("Inter", 20),
+            fill="#FDDAB1",
+            stroke=2,
+            stroke_fill="#FF567D",
+            mode="pillow",
+            anchor="center",
+            pillow_font_path=FONT_INTER
         )
 
-        self.price_text_id = self.canvas.create_text(
-            SCREEN_W / 2,
-            400,                    # y position for price (tweak if desired)
+        self.price_text_id = OutlinedText(
+            self.canvas,
+            SCREEN_W // 2, 400,
             text="",
-            font=(title_font_name, 28, "bold"),
-            fill="#000000",
-            anchor="n",
-            justify="center"
+            font=("Inter", 40),
+            fill="#FFEA00",
+            stroke=4,
+            stroke_fill="#FF7B00",
+            mode="pillow", 
+            anchor="center",
+            pillow_font_path=FONT_INTER
         )
 
     def tkraise(self, *args, **kwargs):
@@ -982,41 +1391,22 @@ class SummaryScreen(tk.Frame):
         addons = [self.controller.addons[k]["name"] for k in self.controller.selected_addons]
         parts = []
         if fruits:
-            parts.append("Fruits: " + ", ".join(fruits))
+            parts.append("Fruits:  " + ", ".join(fruits))
         if addons:
-            parts.append("Add-ons: " + ", ".join(addons))
+            parts.append("Add-ons:  " + ", ".join(addons))
         items_text = "\n".join(parts) if parts else "No items selected"
 
         total = self.controller.calculate_total()
-        price_text = "Total: " + money_str(total)
+        price_text = "Total:   " + money_str(total)
 
         # Update the canvas text items (keeps them centered)
         try:
-            self.canvas.itemconfigure(self.items_text_id, text=items_text)
-            self.canvas.itemconfigure(self.price_text_id, text=price_text)
+            self.items_text_id.update(text=items_text)
+            self.price_text_id.update(text=price_text)
         except Exception as e:
             self.controller.log(f"Failed to update summary canvas text: {e}")
 
         self.controller.log("Summary screen shown; total = " + money_str(total))
-
-    def render_summary(self):
-        """Called from show_frame to refresh summary when entering screen."""
-        # Same as tkraise update but without raising the frame
-        fruits = [self.controller.catalog[k]["name"] for k in self.controller.selected_fruits]
-        addons = [self.controller.addons[k]["name"] for k in self.controller.selected_addons]
-        parts = []
-        if fruits:
-            parts.append("Fruits: " + ", ".join(fruits))
-        if addons:
-            parts.append("Add-ons: " + ", ".join(addons))
-        items_text = "\n".join(parts) if parts else "No items selected"
-        total = self.controller.calculate_total()
-        price_text = "Total: " + money_str(total)
-        try:
-            self.canvas.itemconfigure(self.items_text_id, text=items_text)
-            self.canvas.itemconfigure(self.price_text_id, text=price_text)
-        except Exception as e:
-            self.controller.log(f"Failed to render_summary on summary screen: {e}")
 
 class PaymentSelectionScreen(tk.Frame):
     def __init__(self, parent, controller):
@@ -1030,16 +1420,14 @@ class PaymentSelectionScreen(tk.Frame):
 
         cash_rect = self.canvas.create_rectangle(102, 147, 452, 468, outline="")
         pay_rect = self.canvas.create_rectangle(578, 147, 928, 468, outline="")
-        # Payments gets a bigger timeout (5x default)
-        self.canvas.tag_bind(cash_rect, "<Button-1>", lambda e: self.controller.log("Cash selected") or self.controller.show_frame(CashMethodScreen))
-        self.canvas.tag_bind(pay_rect, "<Button-1>", lambda e: self.controller.log("PayPal selected") or self.controller.show_frame(PaypalMethodScreen))
+        self.canvas.tag_bind(cash_rect, "<Button-1>", lambda e: self.controller.log("Cash selected") or self.controller.show_frame(CashMethodScreen, timeout_ms=self.controller.default_timeout_ms * 10))
+        self.canvas.tag_bind(pay_rect, "<Button-1>", lambda e: self.controller.log("PayPal selected") or self.controller.show_frame(PaypalMethodScreen, timeout_ms=self.controller.default_timeout_ms * 10))
 
         back_rect = self.canvas.create_rectangle(20, 520, 140, 580, outline="")
-        self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: self.controller.log("Back on PaymentSelection") or self.controller.show_frame(SummaryScreen))
+        self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: self.controller.log("Back on PaymentSelection") or self.controller.show_frame(SummaryScreen, timeout_ms=self.controller.default_timeout_ms * 5))
 
         # SummaryBar for this screen
-        self.summary = SummaryBar(self, width=800, height=48)
-        self.summary.place(relx=0.5, y=550, anchor="n")
+        self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
         self.render_summary()
 
     def render_summary(self):
@@ -1048,7 +1436,7 @@ class PaymentSelectionScreen(tk.Frame):
             parts.append("Fruits: " + ", ".join(self.controller.catalog[k]["name"] for k in self.controller.selected_fruits))
         if self.controller.selected_addons:
             parts.append("Add-ons: " + ", ".join(self.controller.addons[k]["name"] for k in self.controller.selected_addons))
-        parts.append(money_str(self.controller.calculate_total()))
+        parts.append("Total: " + money_str(self.controller.calculate_total()))
         summary_text = " | ".join(parts) if parts else "No items selected"
         self.summary.set_text(summary_text)
 
@@ -1076,8 +1464,7 @@ class CashMethodScreen(tk.Frame):
 
         # Back touch zone
         self.back_rect = self.canvas.create_rectangle(20, 520, 140, 580, outline="")
-        self.canvas.tag_bind(self.back_rect, "<Button-1>",
-                             lambda e: (self.controller.log("Back on CashMethod"),self.controller.show_frame(PaymentSelectionScreen)))
+        self.canvas.tag_bind(self.back_rect, "<Button-1>", lambda e: (self.controller.log("Back on CashMethod"),self.controller.show_frame(PaymentSelectionScreen, timeout_ms=self.controller.default_timeout_ms * 5)))
 
         # Admin tap zone (top-right). This zone receives taps and uses a 3-tap unlock.
         x1, y1 = SCREEN_W - 100, 0
@@ -1092,19 +1479,31 @@ class CashMethodScreen(tk.Frame):
         self.canvas.tag_bind(self.admin_zone, "<Button-1>", self._on_admin_zone_click)
 
         # Price display (canvas text so background stays transparent)
-        self.price_text_id = self.canvas.create_text(
-            SCREEN_W // 1.1, 240,
-            text="", 
-            font=("Arial", 26, "bold"),
-            fill="#FFFFFF", anchor="e"
+        self.price_text_id = OutlinedText(
+            self.canvas,
+            SCREEN_W // 1.1, 230,
+            text="",
+            font=("Inter", 40),
+            fill="#FFEA00",
+            stroke=3,
+            stroke_fill="#FF7B00",
+            mode="pillow", 
+            anchor="e",
+            pillow_font_path=FONT_INTER
         )
 
         # Entered amount display
-        self.entered_text_id = self.canvas.create_text(
+        self.entered_text_id = OutlinedText(
+            self.canvas,
             SCREEN_W // 1.1, 400,
-            text=amount_str(0.0),
-            font=("Arial", 26, "bold"),
-            fill="#FFFFFF", anchor="e"
+            text="",
+            font=("Inter", 40),
+            fill="#FFEA00",
+            stroke=3,
+            stroke_fill="#FF7B00",
+            mode="pillow", 
+            anchor="e",
+            pillow_font_path=FONT_INTER
         )
 
         # Internal state
@@ -1112,8 +1511,7 @@ class CashMethodScreen(tk.Frame):
         self._auto_proceed_job = None
 
         # Summary bar
-        self.summary = SummaryBar(self, width=800, height=48)
-        self.summary.place(relx=0.5, y=550, anchor="n")
+        self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
 
         # Build local admin panel (hidden by default)
         self.admin_panel = tk.Frame(self, width=620, height=340, bg="#222", bd=3, relief="raised")
@@ -1249,13 +1647,13 @@ class CashMethodScreen(tk.Frame):
     def _update_price_text(self):
         total = self.controller.calculate_total()
         try:
-            self.canvas.itemconfigure(self.price_text_id, text=amount_str(total))
+            self.price_text_id.update(text=amount_str(total))
         except Exception as e:
             self.controller.log(f"CashMethod: failed to update price text: {e}")
 
     def _update_entered_text(self):
         try:
-            self.canvas.itemconfigure(self.entered_text_id, text=amount_str(self.entered_amount))
+            self.entered_text_id.update(text=amount_str(self.entered_amount))
         except Exception as e:
             self.controller.log(f"CashMethod: failed to update entered text: {e}")
 
@@ -1307,7 +1705,6 @@ class CashMethodScreen(tk.Frame):
             parts.append("Fruits: " + ", ".join(self.controller.catalog[k]["name"] for k in self.controller.selected_fruits))
         if self.controller.selected_addons:
             parts.append("Add-ons: " + ", ".join(self.controller.addons[k]["name"] for k in self.controller.selected_addons))
-        parts.append(money_str(self.controller.calculate_total()))
         summary_text = " | ".join(parts) if parts else "No items selected"
         self.summary.set_text(summary_text)
 
@@ -1331,24 +1728,28 @@ class PaypalMethodScreen(tk.Frame):
         self.canvas.tag_bind(
             back_rect,
             "<Button-1>",
-            lambda e: self.controller.log("Back on PayPal") or self.controller.show_frame(PaymentSelectionScreen)
+            lambda e: self.controller.log("Back on PayPal") or self.controller.show_frame(PaymentSelectionScreen, timeout_ms=self.controller.default_timeout_ms * 5)
         )
         total = self.controller.calculate_total()
         # PRICE LABEL
-        self.price_text_id = self.canvas.create_text(
-            SCREEN_W // 1.95, 305,
-            text=amount_str(total),
-            font=("Arial", 28, "bold"),
-            fill="#000000",
-            anchor="e"
+        self.price_text_id = OutlinedText(
+            self.canvas,
+            SCREEN_W // 1.95, 300,
+            text="",
+            font=("Inter", 40),
+            fill="#00EEFF",
+            stroke=3,
+            stroke_fill="#0068DE",
+            mode="pillow", 
+            anchor="e",
+            pillow_font_path=FONT_INTER
         )
 
         # PAY CONFIRM BUTTON
         btn = tk.Button(self, text="I PAID", command=self.confirm_paid)
         btn.place(x=950, y=550)
         # SUMMARY BAR
-        self.summary = SummaryBar(self, width=800, height=48)
-        self.summary.place(relx=0.5, y=550, anchor="n")
+        self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
         try:
             self.render_summary()
         except Exception as e:
@@ -1366,7 +1767,6 @@ class PaypalMethodScreen(tk.Frame):
             parts.append("Fruits: " + ", ".join(self.controller.catalog[k]["name"] for k in self.controller.selected_fruits))
         if self.controller.selected_addons:
             parts.append("Add-ons: " + ", ".join(self.controller.addons[k]["name"] for k in self.controller.selected_addons))
-        parts.append(money_str(self.controller.calculate_total()))
         summary_text = " | ".join(parts) if parts else "No items selected"
         self.summary.set_text(summary_text)
         
@@ -1376,7 +1776,7 @@ class PaypalMethodScreen(tk.Frame):
         try:
             total = self.controller.calculate_total()
             try:
-                self.canvas.itemconfigure(self.price_text_id, text=amount_str(total))
+                self.price_text_id.update(text=amount_str(total))
             except Exception as e:
                 self.controller.log(f"PaypalMethodScreen: failed to update price_text_id: {e}")
             self.render_summary()
@@ -1443,15 +1843,35 @@ class ProcessingScreen(tk.Frame):
                                                       fill=self.cget("bg"), outline="")
 
         # percent and description canvas text (transparent background by design)
-        # kept positions you requested
-        self.percent_id = self.canvas.create_text(SCREEN_W // 2, 383, text="0%", font=("Arial", 24),
-                                                  fill="#000000", anchor="center")
-        self.desc_id = self.canvas.create_text(SCREEN_W // 2, 432, text="Starting...", font=("Arial", 20),
-                                               fill="#000000", anchor="center")
+        self.percent_id = OutlinedText(
+            self.canvas,
+            SCREEN_W // 2, 383,
+            text="0%",
+            font=("Inter", 40),                # tuple: (family, size)
+            fill="#FDDAB1",                    # your foreground color
+            stroke=3,                          # default outline width
+            stroke_fill="#FF567D",             # outline color (black)
+            mode="pillow",                     # use Pillow rendering (exact stroke)
+            anchor="center",
+            pillow_font_path=FONT_INTER  # optional, if you bundle the .ttf
+        )
+
+        # description text (centered)
+        self.desc_id = OutlinedText(
+            self.canvas,
+            SCREEN_W // 2, 442,
+            text="Starting...",
+            font=("Inter", 30),
+            fill="#FDDAB1",
+            stroke=3,
+            stroke_fill="#FF567D",
+            mode="pillow",
+            anchor="center",
+            pillow_font_path=FONT_INTER
+        )
 
         # Summary bar (kept)
-        self.summary = SummaryBar(self, width=800, height=48)
-        self.summary.place(relx=0.5, y=550, anchor="n")
+        self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
 
         # Handle: support swapping handle images by process and snapping rotation
         self.handle_id = None
@@ -1534,6 +1954,7 @@ class ProcessingScreen(tk.Frame):
             parts.append("Fruits: " + ", ".join(self.controller.catalog[k]["name"] for k in self._fruits_snapshot))
         if self._addons_snapshot:
             parts.append("Add-ons: " + ", ".join(self.controller.addons[k]["name"] for k in self._addons_snapshot))
+        parts.append("Total: " + money_str(self.controller.calculate_total()))
         summary_text = " | ".join(parts) if parts else "No items selected"
         self.summary.set_text(summary_text)
 
@@ -1621,7 +2042,6 @@ class ProcessingScreen(tk.Frame):
                 self.canvas.coords(self.cover, new_left, self.bar_y1, self.bar_x2, self.bar_y2)
 
         # update labels
-        self.canvas.itemconfigure(self.percent_id, text=f"{int(pct)}%")
         if pct <= 15:
             desc = "Dispensing Fruit..."
         elif pct <= 30:
@@ -1634,7 +2054,18 @@ class ProcessingScreen(tk.Frame):
             desc = "Sealing Cup..."
         else:
             desc = "Done!"
-        self.canvas.itemconfigure(self.desc_id, text=desc)
+        # Try updating OutlinedText instances; fall back to raw canvas text if something goes wrong
+        try:
+            # preferred: update our OutlinedText objects
+            self.percent_id.update(text=f"{int(pct)}%")
+            self.desc_id.update(text=desc)
+        except Exception:
+            # fallback: original canvas items (in case OutlinedText not present)
+            try:
+                self.canvas.itemconfigure(self.percent_id, text=f"{int(pct)}%")
+                self.canvas.itemconfigure(self.desc_id, text=desc)
+            except Exception:
+                pass
 
         # determine which handle image to use for this segment (if provided)
         seg = self._current_segment_index(pct)
@@ -1703,7 +2134,7 @@ class ProcessingScreen(tk.Frame):
             self.controller.resume_inactivity()
         except Exception:
             pass
-        self.controller.show_frame(OrderCompleteScreen)
+        self.controller.show_frame(OrderCompleteScreen, timeout_ms=self.controller.default_timeout_ms * 2)
 
 class OrderCompleteScreen(tk.Frame):
     def __init__(self, parent, controller):
@@ -1714,80 +2145,397 @@ class OrderCompleteScreen(tk.Frame):
         self.bg_img = load_image_tk("completeScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
-        self.canvas.bind("<Button-1>", lambda e: controller.log("OrderComplete tapped") or controller.show_frame(WelcomeScreen))
+        self.canvas.bind("<Button-1>", lambda e: controller.log("OrderComplete tapped") or controller.show_frame(WelcomeScreen, pause=True))
 
 class ErrorScreen(tk.Frame):
-    """Shown when ingredients are out of stock or all fruits are out of stock."""
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
+
+        # Canvas / background (keep touch feedback binding)
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        self.controller.log("ErrorScreen is shown now")
         try:
             self.bg_img = load_image_tk("errorScreen.png", resize_to=(SCREEN_W, SCREEN_H))
             self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         except Exception:
-            # fallback: fill with red
-            self.canvas.create_rectangle(0,0,SCREEN_W,SCREEN_H, fill="darkred")
-            self.canvas.create_text(SCREEN_W//2, SCREEN_H//2, text="ERROR: Out of stock", fill="#000000", font=("Arial", 28, "bold"))
+            # fallback visual
+            self.canvas.create_rectangle(0, 0, SCREEN_W, SCREEN_H, fill="darkred")
+            self.canvas.create_text(SCREEN_W // 2, SCREEN_H // 2,
+                                    text="ERROR: Out of stock",
+                                    fill="#000000", font=("Arial", 28, "bold"))
 
-        # Hidden admin zone: top-right 250x250
-        x1, y1 = SCREEN_W - 100, 0
-        x2, y2 = SCREEN_W, 100
+        # keep touch feedback binding (do not remove)
+        self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
+
+        # Hidden admin zone (top-right). Use same size as WelcomeScreen for consistency.
+        x1, y1 = SCREEN_W - 250, 0
+        x2, y2 = SCREEN_W, 250
         self.admin_zone = self.canvas.create_rectangle(x1, y1, x2, y2, outline="", fill="")
+        # use the _on_admin_zone_tap handler which implements the 3-tap unlock and returns "break"
         self.canvas.tag_bind(self.admin_zone, "<Button-1>", self._on_admin_zone_tap)
 
-        self.tap_count = 0
-        self.last_tap = 0
+        # admin state for tapping
+        self._admin_tap_count = 0
+        self._admin_tap_reset_job = None
 
-        # admin panel for error screen (simple)
-        self.admin_panel = tk.Frame(self, width=500, height=220, bg="#222", bd=3, relief="raised")
+        # Admin panel frame (overlay) - initially hidden
+        self.admin_panel = tk.Frame(self, width=750, height=575, bg="#222", bd=4, relief="raised")
         self.admin_panel.place(relx=0.5, rely=0.5, anchor="center")
         self.admin_panel.place_forget()
-        self.admin_visible = False
+        self.admin_panel_visible = False
 
-        # admin buttons inside panel
-        tk.Label(self.admin_panel, text="ERROR ADMIN", font=("Arial", 14), bg="#222", fg="white").pack(pady=(8,4))
-        btn_recheck = tk.Button(self.admin_panel, text="Recheck Stock", command=self._recheck)
-        btn_recheck.pack(pady=6)
-        btn_exit = tk.Button(self.admin_panel, text="Exit", command=self._exit_error)
-        btn_exit.pack(pady=6)
+        # Build admin UI inside panel (consistent with WelcomeScreen style)
+        self._build_admin_ui()
 
+    # -------------------------
+    # Admin UI builder (same pattern as WelcomeScreen)
+    # -------------------------
+    def _build_admin_ui(self):
+        """Populate the admin panel with stock/sales rows and admin controls."""
+        panel = self.admin_panel
+
+        # Clear any previous widgets (safe to call multiple times)
+        for w in panel.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
+        # Title
+        title = tk.Label(panel, text="ADMIN PANEL", font=("Arial", 18, "bold"), bg="#222", fg="white")
+        title.place(relx=0.5, y=12, anchor="n")
+
+        # Close button (hide admin)
+        close_btn = tk.Button(panel, text="Close", command=self.toggle_admin)
+        close_btn.place(x=panel.winfo_reqwidth() - 15, y=5, width=60, height=28, anchor="ne")
+        # Exit button (closes app)
+        exit_btn = tk.Button(panel, text="Exit", command=lambda: self.controller.destroy())
+        exit_btn.place(x=panel.winfo_reqwidth() - 15, y=panel.winfo_reqheight() - 15, anchor="se")
+
+        # Fullscreen toggle
+        def _toggle_fullscreen():
+            try:
+                new_state = not getattr(self.controller, "is_fullscreen", False)
+                try:
+                    self.controller.attributes("-fullscreen", new_state)
+                except Exception:
+                    try:
+                        self.controller.attributes("-zoomed", new_state)
+                    except Exception:
+                        pass
+                self.controller.is_fullscreen = new_state
+                self._fs_btn.config(text="Fullscreen: ON" if new_state else "Fullscreen: OFF")
+            except Exception as e:
+                self.controller.log(f"Failed to toggle fullscreen: {e}")
+
+        self._fs_btn = tk.Button(panel, text=("Fullscreen: ON" if getattr(self.controller, "is_fullscreen", False) else "Fullscreen: OFF"), command=_toggle_fullscreen)
+        self._fs_btn.place(x=5, y=5, anchor="nw")
+        
+        self.recheck_btn = tk.Button(
+            self.admin_panel,
+            text="Recheck Stock",
+            command=self.recheck_stock
+            )
+        self.recheck_btn.place(x=5, y=panel.winfo_reqheight() - 15, anchor="sw")
+
+        # Admin rows area (where each fruit/add-on row will be shown)
+        rows_frame = tk.Frame(panel, bg="#222")
+        rows_frame.place(relx=0.5, rely=0.12, anchor="n", relwidth=0.96, relheight=0.78)
+
+        # store the parent so _refresh_admin_rows can populate into it
+        self.admin_rows_parent = rows_frame
+
+        # Try to populate rows using your existing helper (keeps single source of truth)
+        if hasattr(self, "_refresh_admin_rows"):
+            try:
+                self._refresh_admin_rows()
+            except Exception as e:
+                self.controller.log(f"Welcome: _refresh_admin_rows() error: {e}")
+                # fallback display if the helper exists but fails
+                for w in rows_frame.winfo_children():
+                    w.destroy()
+                tk.Label(rows_frame, text="(admin refresh failed)", bg="#222", fg="white").pack()
+        else:
+            # No helper found: create a minimal interactive fallback
+            for w in rows_frame.winfo_children():
+                w.destroy()
+
+            def make_row(parent, row_idx, label_text, stock_val_getter, change_fn):
+                r = tk.Frame(parent, bg="#222")
+                r.grid_rowconfigure(0, weight=1)
+                r.grid_columnconfigure(0, weight=1)
+                r.grid(row=row_idx, column=0, sticky="ew", pady=2)
+
+                lbl = tk.Label(r, text=label_text, bg="#222", fg="white", anchor="w")
+                lbl.pack(side="left", padx=6)
+
+                stock_var = tk.StringVar(value=str(stock_val_getter()))
+                stock_label = tk.Label(r, textvariable=stock_var, bg="#222", fg="white", width=6)
+                stock_label.pack(side="left", padx=6)
+
+                def on_change(delta):
+                    try:
+                        change_fn(delta)
+                        stock_var.set(str(stock_val_getter()))
+                    except Exception as e:
+                        self.controller.log(f"Admin change error: {e}")
+
+                minus = tk.Button(r, text="-", command=lambda: on_change(-1))
+                minus.pack(side="left")
+                plus = tk.Button(r, text="+", command=lambda: on_change(1))
+                plus.pack(side="left")
+
+            # populate fruits
+            row = 0
+            catalog = getattr(self.controller, "catalog", {})
+            for k, info in catalog.items():
+                name = info.get("name", k)
+                make_row(rows_frame, row, f"{name} (fruit)", lambda info=info: int(info.get("stock", 0)),
+                         lambda d, info=info: info.__setitem__("stock", max(0, int(info.get("stock", 0)) + d)))
+                row += 1
+
+            # populate addons
+            addons = getattr(self.controller, "addons", {})
+            for k, info in addons.items():
+                name = info.get("name", k)
+                make_row(rows_frame, row, f"{name} (add-on)", lambda info=info: int(info.get("stock", 0)),
+                         lambda d, info=info: info.__setitem__("stock", max(0, int(info.get("stock", 0)) + d)))
+                row += 1
+
+    def _refresh_admin_rows(self):
+        """Recreate the admin rows listing each fruit, its stock, sales, add-ons, ingredients, and controls."""
+        parent = self.admin_rows_parent
+        # clear children
+        for w in parent.winfo_children():
+            w.destroy()
+
+        # heading row
+        hdr = tk.Frame(parent, bg="#222")
+        hdr.pack(fill="x", pady=(2,6))
+        tk.Label(hdr, text="Item", width=20, anchor="w", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(hdr, text="Stock", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(hdr, text="Sales", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(hdr, text="Best", width=6, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(hdr, text="Controls", width=28, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
+
+        # rows for each fruit
+        for key, meta in self.controller.catalog.items():
+            row = tk.Frame(parent, bg="#222")
+            row.pack(fill="x", pady=2)
+
+            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
+
+            stock_lbl = tk.Label(row, text=str(meta.get("stock", meta.get("in_stock", ""))), width=8, anchor="center", bg="#222", fg="white")
+            stock_lbl.pack(side="left", padx=4)
+
+            sales_lbl = tk.Label(row, text=str(meta.get("sales", 0)), width=8, anchor="center", bg="#222", fg="white")
+            sales_lbl.pack(side="left", padx=4)
+
+            best_lbl = tk.Label(row, text="✓" if meta.get("best_seller", False) else "", width=6, anchor="center", bg="#222", fg="#0f0")
+            best_lbl.pack(side="left", padx=4)
+
+            # controls
+            controls = tk.Frame(row, bg="#222")
+            controls.pack(side="left", padx=4)
+
+            def make_inc_stock(k):
+                return lambda: self._admin_change_stock(k, +1)
+            def make_dec_stock(k):
+                return lambda: self._admin_change_stock(k, -1)
+            def make_inc_sales(k):
+                return lambda: self._admin_change_sales(k, +1)
+            def make_dec_sales(k):
+                return lambda: self._admin_change_sales(k, -1)
+
+            btn_dec_stock = tk.Button(controls, text="-Stock", command=make_dec_stock(key), width=8)
+            btn_dec_stock.pack(side="left", padx=2)
+            btn_inc_stock = tk.Button(controls, text="+Stock", command=make_inc_stock(key), width=8)
+            btn_inc_stock.pack(side="left", padx=2)
+            btn_dec_sales = tk.Button(controls, text="-Sales", command=make_dec_sales(key), width=8)
+            btn_dec_sales.pack(side="left", padx=6)
+            btn_inc_sales = tk.Button(controls, text="+Sales", command=make_inc_sales(key), width=8)
+            btn_inc_sales.pack(side="left", padx=2)
+
+        # Separator for addons
+        sep = tk.Label(parent, text="Add-Ons", bg="#222", fg="#fff", anchor="w")
+        sep.pack(fill="x", pady=(8,4), padx=6)
+
+        for key, meta in self.controller.addons.items():
+            row = tk.Frame(parent, bg="#222")
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
+            stock_lbl = tk.Label(row, text=str(meta.get("stock", 0)), width=8, anchor="center", bg="#222", fg="white")
+            stock_lbl.pack(side="left", padx=4)
+            sales_lbl = tk.Label(row, text=str(meta.get("sales", 0)), width=8, anchor="center", bg="#222", fg="white")
+            sales_lbl.pack(side="left", padx=4)
+            controls = tk.Frame(row, bg="#222"); controls.pack(side="left", padx=4)
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_addon_stock(k, -1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_addon_stock(k, +1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="-Sales", command=lambda k=key: self._admin_change_addon_sales(k, -1), width=8).pack(side="left", padx=6)
+            tk.Button(controls, text="+Sales", command=lambda k=key: self._admin_change_addon_sales(k, +1), width=8).pack(side="left", padx=2)
+
+        # Separator for ingredients (stock only)
+        sep2 = tk.Label(parent, text="Ingredients (stock only)", bg="#222", fg="#fff", anchor="w")
+        sep2.pack(fill="x", pady=(8,4), padx=6)
+
+        for key, meta in self.controller.ingredients.items():
+            row = tk.Frame(parent, bg="#222")
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
+            stock_lbl = tk.Label(row, text=str(meta.get("stock", 0)), width=8, anchor="center", bg="#222", fg="white")
+            stock_lbl.pack(side="left", padx=4)
+            controls = tk.Frame(row, bg="#222"); controls.pack(side="left", padx=4)
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, -1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, +1), width=8).pack(side="left", padx=2)
+
+        # Income display and reset
+        income_row = tk.Frame(parent, bg="#222")
+        income_row.pack(fill="x", pady=(8,2))
+        tk.Label(income_row, text="Total Income:", width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
+        tk.Label(income_row, text=f"{self.controller.total_income:.2f}", width=12, anchor="w", bg="#222", fg="#FFD700").pack(side="left", padx=4)
+        tk.Button(income_row, text="Reset Income", command=lambda: self._admin_reset_income(), width=12).pack(side="left", padx=6)
+
+    def recheck_stock(self):
+        if not self.controller.check_error_state():
+            self.controller.show_frame(WelcomeScreen, pause=True)
+
+    def _admin_change_stock(self, key, delta):
+        """Change stock safely and refresh UI; delta may be positive or negative."""
+        item = self.controller.catalog.get(key)
+        if not item:
+            return
+        new_stock = max(0, item.get("stock", 0) + delta)
+        item["stock"] = new_stock
+        self.controller.log(f"Admin changed stock for {key}: {delta} -> new stock {new_stock}")
+        # refresh overlays and admin rows and any summaries
+        self.controller.update_best_sellers()
+        fs = self.controller.frames.get(FruitSelectionScreen)
+        if fs:
+            try:
+                fs.update_overlays()
+                fs.render_summary()
+            except Exception:
+                pass
+        self._refresh_admin_rows()
+
+    def _admin_change_sales(self, key, delta):
+        item = self.controller.catalog.get(key)
+        if not item:
+            return
+        new_sales = max(0, item.get("sales", 0) + delta)
+        item["sales"] = new_sales
+        self.controller.log(f"Admin changed sales for {key}: {delta} -> new sales {new_sales}")
+        try:
+            self.update_best_sellers()
+        except Exception:
+            pass
+        self._refresh_admin_rows()
+
+    def _admin_change_addon_stock(self, key, delta):
+        item = self.controller.addons.get(key)
+        if not item:
+            return
+        item["stock"] = max(0, item.get("stock", 0) + delta)
+        self.controller.log(f"Admin changed addon stock for {key}: {delta} -> {item['stock']}")
+        self._refresh_admin_rows()
+
+    def _admin_change_addon_sales(self, key, delta):
+        item = self.controller.addons.get(key)
+        if not item:
+            return
+        item["sales"] = max(0, item.get("sales", 0) + delta)
+        self.controller.log(f"Admin changed addon sales for {key}: {delta} -> {item['sales']}")
+        self._refresh_admin_rows()
+
+    def _admin_change_ingredient_stock(self, key, delta):
+        item = self.controller.ingredients.get(key)
+        if not item:
+            return
+        item["stock"] = max(0, item.get("stock", 0) + delta)
+        self.controller.log(f"Admin changed ingredient stock for {key}: {delta} -> {item['stock']}")
+        self._refresh_admin_rows()
+
+    def _admin_reset_income(self):
+        self.controller.total_income = 0.0
+        self.controller.log("Admin reset total income")
+        self._refresh_admin_rows()
+
+    def _admin_change_sales(self, key, delta):
+        """Change sales safely and refresh UI; delta may be positive or negative but sales clamped to >= 0."""
+        item = self.controller.catalog.get(key)
+        if not item:
+            return
+        new_sales = max(0, item.get("sales", 0) + delta)
+        item["sales"] = new_sales
+        self.controller.log(f"Admin changed sales for {key}: {delta} -> new sales {new_sales}")
+        # recompute best sellers and refresh overlays + admin rows
+        self.controller.update_best_sellers()
+        fs = self.controller.frames.get(FruitSelectionScreen)
+        if fs:
+            try:
+                fs.update_overlays()
+                fs.render_summary()
+            except Exception:
+                pass
+        self._refresh_admin_rows()
+
+    # -------------------------
+    # Admin zone tap / toggle
+    # -------------------------
     def _on_admin_zone_tap(self, event):
-        now = time.time()
-        if now - self.last_tap > 2:
-            self.tap_count = 0
-        self.tap_count += 1
-        self.last_tap = now
-        if self.tap_count >= 3:
-            # show admin
-            self._toggle_admin_panel()
-            self.tap_count = 0
+        """Count taps for 3-tap unlock. Return 'break' to stop propagation."""
+        self._admin_tap_count += 1
+        self.controller.log(f"Error admin zone tapped ({self._admin_tap_count}/3)")
+
+        # cancel previous reset job
+        if self._admin_tap_reset_job:
+            try:
+                self.after_cancel(self._admin_tap_reset_job)
+            except Exception:
+                pass
+            self._admin_tap_reset_job = None
+
+        if self._admin_tap_count >= 3:
+            self._admin_tap_count = 0
+            self._admin_tap_reset_job = None
+            self.toggle_admin()
             return "break"
+
+        # schedule reset
+        self._admin_tap_reset_job = self.after(1000, self._reset_admin_tap_count)
         return "break"
 
-    def _toggle_admin_panel(self):
-        if self.admin_visible:
+    def _reset_admin_tap_count(self):
+        self._admin_tap_count = 0
+        self._admin_tap_reset_job = None
+        self.controller.log("Error admin tap count reset")
+
+    def toggle_admin(self):
+        """Show / hide the admin panel overlay."""
+        if getattr(self, "admin_panel_visible", False):
             self.admin_panel.place_forget()
-            self.admin_visible = False
-            self.controller.log("Error admin hidden")
+            self.admin_panel_visible = False
+            self.controller.log("Error admin panel hidden")
+            # resume inactivity timer when admin is hidden (if desired)
+            try:
+                self.controller.resume_inactivity()
+            except Exception:
+                pass
         else:
-            self.admin_panel.place(relx=0.5, rely=0.6, anchor="center")
-            self.admin_visible = True
-            self.controller.log("Error admin shown")
-
-    def _recheck(self):
-        # Ask the controller to re-evaluate stock; if ok, go back to Welcome
-        if not self.controller.check_error_state():
-            self.controller.log("Recheck: stock OK - returning to Welcome")
-            self.controller.show_frame(WelcomeScreen)
-        else:
-            self.controller.log("Recheck: still error")
-
-    def _exit_error(self):
-        self.controller.log("Admin chose Exit from Error screen - going to Welcome (forced)")
-        self.controller.show_frame(WelcomeScreen)
+            # show and pause inactivity timer so admin can use controls safely
+            self.admin_panel.place(relx=0.5, rely=0.5, anchor="center")
+            self.admin_panel_visible = True
+            self.controller.log("Error admin panel shown")
+            try:
+                self.controller.pause_inactivity()
+            except Exception:
+                pass
+            # refresh rows (in case stock changed while panel hidden)
+            try:
+                self._refresh_admin_rows()
+            except Exception:
+                pass
 
 # -------------------------
 # Run
