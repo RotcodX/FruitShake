@@ -447,6 +447,7 @@ class App(tk.Tk):
         self.title("Fruit Shake Vending Machine")
         self.geometry(f"{SCREEN_W}x{SCREEN_H}")
         self.resizable(False, False)
+        self.attributes('-fullscreen', True)
 
         # debug / logging
         self.debug_mode = False
@@ -750,7 +751,7 @@ class WelcomeScreen(tk.Frame):
         # Fullscreen toggle
         def _toggle_fullscreen():
             try:
-                new_state = not getattr(self.controller, "is_fullscreen", False)
+                new_state = not getattr(self.controller, "is_fullscreen", True)
                 try:
                     self.controller.attributes("-fullscreen", new_state)
                 except Exception:
@@ -759,7 +760,7 @@ class WelcomeScreen(tk.Frame):
                     except Exception:
                         pass
                 self.controller.is_fullscreen = new_state
-                self._fs_btn.config(text="Fullscreen: ON" if new_state else "Fullscreen: OFF")
+                self._fs_btn.config(text="Fullscreen: OFF" if new_state else "Fullscreen: ON")
             except Exception as e:
                 self.controller.log(f"Failed to toggle fullscreen: {e}")
 
@@ -2292,7 +2293,7 @@ class ErrorScreen(tk.Frame):
         # Fullscreen toggle
         def _toggle_fullscreen():
             try:
-                new_state = not getattr(self.controller, "is_fullscreen", False)
+                new_state = not getattr(self.controller, "is_fullscreen", True)
                 try:
                     self.controller.attributes("-fullscreen", new_state)
                 except Exception:
@@ -2301,7 +2302,7 @@ class ErrorScreen(tk.Frame):
                     except Exception:
                         pass
                 self.controller.is_fullscreen = new_state
-                self._fs_btn.config(text="Fullscreen: ON" if new_state else "Fullscreen: OFF")
+                self._fs_btn.config(text="Fullscreen: OFF" if new_state else "Fullscreen: ON")
             except Exception as e:
                 self.controller.log(f"Failed to toggle fullscreen: {e}")
 
