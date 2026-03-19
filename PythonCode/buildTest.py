@@ -23,16 +23,6 @@ ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 FONT_INTER = os.path.join(ASSETS_DIR, "Inter", "static", "Inter_28pt-ExtraBold.ttf")
 SCREEN_W, SCREEN_H = 1024, 600 
 
-class AdminPanel(tk.Frame):
-    def __init__(self, parent, controller):
-        super().__init__(parent, bg="#222", bd=4, relief="raised")
-        self.controller = controller
-
-        self.place(relx=0.5, rely=0.5, anchor="center")
-        self.place_forget()  # hidden by default
-
-        self.build_ui()
-
 class OutlinedText:
     def __init__(self, canvas, x, y, text="", font=("Arial", 24), fill="#FFF",
                  stroke=1, stroke_fill="#000", shadow=None, mode="pillow",
@@ -254,11 +244,11 @@ class TouchFeedbackManager:
 
     def ripple(self, canvas, x, y):
         r = 0
-        circle = canvas.create_oval(x-r, y-r, x+r, y+r, outline="white", width=1)
+        circle = canvas.create_oval(x-r, y-r, x+r, y+r, outline="#FF6F00", width=1)
         for i in range(10):
             canvas.after(
                i * 40,
-               lambda c=circle, rr=r+i*2, w=max(1, 10-i):
+               lambda c=circle, rr=r+i*2.5, w=max(1, 10-i):
                (
                    canvas.coords(c, x-rr, y-rr, x+rr, y+rr),
                    canvas.itemconfig(c, width=w)
@@ -545,10 +535,10 @@ class App(tk.Tk):
             self.debug_widget = None
             self.debug_mode = False
         else:
-            txt = tk.Text(self, width=40, height=12, bg="#111", fg="#0f0")
+            txt = tk.Text(self, width=100, height=12, bg="#111", fg="#0f0")
             txt.insert("end", "\n".join(self._debug_lines[-200:]) + ("\n" if self._debug_lines else ""))
             txt.config(state="disabled")
-            txt.place(x=SCREEN_W - 420, y=20)
+            txt.place(x=50, y=15)
             self.debug_widget = txt
             self.debug_mode = True
 
@@ -1877,7 +1867,7 @@ class ProcessingScreen(tk.Frame):
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
         # progress bar coordinates (kept as requested)
-        self.bar_x1, self.bar_y1, self.bar_x2, self.bar_y2 = (137, 230, 887, 265)
+        self.bar_x1, self.bar_y1, self.bar_x2, self.bar_y2 = (137, 156, 887, 315)
         bar_w = self.bar_x2 - self.bar_x1
         bar_h = self.bar_y2 - self.bar_y1
 
@@ -1927,7 +1917,7 @@ class ProcessingScreen(tk.Frame):
             font=("Inter", 40),                # tuple: (family, size)
             fill="#FDDAB1",                    # your foreground color
             stroke=3,                          # default outline width
-            stroke_fill="#FF567D",             # outline color (black)
+            stroke_fill="#FF3463",             # outline color (black)
             mode="pillow",                     # use Pillow rendering (exact stroke)
             anchor="center",
             pillow_font_path=FONT_INTER  # optional, if you bundle the .ttf
@@ -1941,7 +1931,7 @@ class ProcessingScreen(tk.Frame):
             font=("Inter", 30),
             fill="#FDDAB1",
             stroke=3,
-            stroke_fill="#FF567D",
+            stroke_fill="#FF3463",
             mode="pillow",
             anchor="center",
             pillow_font_path=FONT_INTER
@@ -1949,20 +1939,38 @@ class ProcessingScreen(tk.Frame):
 
         # Summary bar (kept)
         self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
+        # vertical progress line (behind handle)
+        self.line_id = None
+        self.line_photo = None
+        try:
+            line_path = os.path.join(ASSETS_DIR, "progressLine.png")
+            if os.path.exists(line_path):
+                line_img = Image.open(line_path).convert("RGBA")
+                target_h = bar_h
+                aspect = line_img.width / line_img.height
+                new_w = int(target_h * aspect)
+                line_img = line_img.resize((new_w, target_h), Image.LANCZOS)
+                self.line_photo = ImageTk.PhotoImage(line_img)
+                # initial placement (left edge of bar)
+                lx = self.bar_x1
+                ly = (self.bar_y1 + self.bar_y2) // 2
+                self.line_id = self.canvas.create_image(lx, ly, image=self.line_photo)
+        except Exception as e:
+            self.controller.log(f"Couldn't load progressLine: {e}")
+            self.line_id = None
+            self.line_photo = None
 
         # Handle: support swapping handle images by process and snapping rotation
         self.handle_id = None
         self.handle_base_orig = None     # current base PIL image for the handle (unrotated)
         self.handle_rot_photo = None     # current rotated PhotoImage shown on canvas
         self.handle_imgs_by_segment = {}  # mapping segment_index -> PIL image (original)
-        self.handle_size = (55, 60)
-
         # attempt to load a generic handle plus per-segment handle images if present
         try:
             # load a default generic handle if available
             default_path = os.path.join(ASSETS_DIR, "progressHandle.png")
             if os.path.exists(default_path):
-                h_img = Image.open(default_path).convert("RGBA").resize(self.handle_size, Image.LANCZOS)
+                h_img = Image.open(default_path).convert("RGBA")
                 self.handle_base_orig = h_img
             # load per-segment handle images (optional)
             # expected names you provided:
@@ -1976,7 +1984,7 @@ class ProcessingScreen(tk.Frame):
             for seg, fname in seg_files.items():
                 p = os.path.join(ASSETS_DIR, fname)
                 if os.path.exists(p):
-                    img = Image.open(p).convert("RGBA").resize(self.handle_size, Image.LANCZOS)
+                    img = Image.open(p).convert("RGBA")
                     self.handle_imgs_by_segment[seg] = img
             # if we have a segment-specific for segment 1, prefer that as base initially
             if 1 in self.handle_imgs_by_segment:
@@ -2164,6 +2172,13 @@ class ProcessingScreen(tk.Frame):
             handle_y = (self.bar_y1 + self.bar_y2) // 2
             # reposition handle; actual rotation image is handled by the animate loop
             self.canvas.coords(self.handle_id, handle_x, handle_y-5)
+
+            if self.line_id:
+                line_x = self.bar_x1 + int(reveal_ratio * (self.bar_x2 - self.bar_x1))
+                line_y = (self.bar_y1 + self.bar_y2) // 2
+                self.canvas.coords(self.line_id, line_x, line_y)
+                # ensure line is below handle (optional if created earlier):
+                self.canvas.tag_lower(self.line_id, self.handle_id)
 
     def _animate_handle(self):
         """Snap rotate left/right using the current handle base image.
