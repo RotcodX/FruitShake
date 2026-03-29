@@ -1,11 +1,8 @@
-# buildTest.py
 import tkinter as tk
 import tkinter.font as tkfont
 import os
 from decimal import Decimal, ROUND_HALF_UP
 import time
-from playsound import playsound
-import simpleaudio as sa
 import math
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageTk
@@ -14,6 +11,13 @@ except Exception:
     _HAS_PIL = False
 import faulthandler
 faulthandler.enable()
+# Supabase
+from dotenv import load_dotenv
+from supabase import create_client
+load_dotenv()
+url = os.environ["SUPABASE_URL"]
+key = os.environ["SUPABASE_KEY"]
+supabase = create_client(url, key)
 
 # -------------------------
 # Config / paths
@@ -59,6 +63,10 @@ class OutlinedText:
 
         # determine requested size
         size = int(self.font[1]) if isinstance(self.font, (list, tuple)) and len(self.font) >= 2 else 24
+        """ DELETE CHECKING & ENABLE IF CHECKING IS NOT NEEDED ON RPI
+        self._pillow_font = ImageFont.truetype(self.pillow_font_path, size)
+        print(f"[OutlinedText] Loaded pillow font from explicit path: {self.pillow_font_path} size={size}")
+        """
 
         # 1) If user provided a direct path, try that first and log
         if self.pillow_font_path:
@@ -68,16 +76,10 @@ class OutlinedText:
                 return
             except Exception as e:
                 print(f"[OutlinedText] Failed to load pillow_font_path '{self.pillow_font_path}': {e}")
-                # fallthrough to attempt to find similar filenames in same dir
-
-        # 2) Try to resolve family name (e.g. "Inter") to some local file
         fam = None
         if isinstance(self.font, (list, tuple)) and len(self.font) >= 1:
             fam = str(self.font[0])
-
-        # If family present, try a few predictable filenames or scan same folder as pillow_font_path
         if fam:
-            # try simple family.ttf first
             candidates = [f"{fam}.ttf", f"{fam}.TTF", f"{fam}.otf"]
             for cand in candidates:
                 try:
@@ -86,8 +88,6 @@ class OutlinedText:
                     return
                 except Exception:
                     pass
-
-            # If user gave pillow_font_path earlier (but failed), search that directory for files containing fam
             if self.pillow_font_path:
                 try:
                     d = os.path.dirname(self.pillow_font_path)
@@ -103,8 +103,6 @@ class OutlinedText:
                                     print(f"[OutlinedText] Tried {fp} but failed: {e}")
                 except Exception as e:
                     print(f"[OutlinedText] Dir-scan for family fonts failed: {e}")
-
-        # 3) Last resort: try truetype by family (may or may not exist on system)
         try:
             if fam:
                 self._pillow_font = ImageFont.truetype(fam, size)
@@ -221,26 +219,9 @@ class OutlinedText:
         self._photo = None
 
 class TouchFeedbackManager:
-    def __init__(self, app, sound_filename="tap.wav"):
+    def __init__(self, app):
         self.app = app
         self.assets_dir = os.path.join(BASE_DIR, "assets")
-        self.sound_path = os.path.join(self.assets_dir, sound_filename)
-
-        # preload simpleaudio WaveObject if file exists
-        self.wave_obj = None
-        try:
-            if os.path.exists(self.sound_path):
-                self.wave_obj = sa.WaveObject.from_wave_file(self.sound_path)
-        except Exception as e:
-            self.app.log(f"TouchFeedback: failed to load sound: {e}")
-
-    def play_sound(self):
-        """Non-blocking play."""
-        try:
-            if self.wave_obj:
-                self.wave_obj.play()   # returns PlayObject; non-blocking
-        except Exception as e:
-            self.app.log(f"TouchFeedback: play_sound error: {e}")
 
     def ripple(self, canvas, x, y):
         r = 0
@@ -268,10 +249,8 @@ class TouchFeedbackManager:
             pass
 
     def on_tap(self, canvas, x, y, rect_id=None):
-        """Convenience: ripple + sound + optional flash."""
         try:
             self.ripple(canvas, x, y)
-            self.play_sound()
             if rect_id is not None:
                 self.flash_rect(canvas, rect_id)
         except Exception as e:
@@ -437,7 +416,7 @@ class App(tk.Tk):
         self.title("Fruit Shake Vending Machine")
         self.geometry(f"{SCREEN_W}x{SCREEN_H}")
         self.resizable(False, False)
-        self.attributes('-fullscreen', True)
+        # self.attributes('-fullscreen', True) # Enable for RPI
 
         # debug / logging
         self.debug_mode = False
@@ -445,29 +424,12 @@ class App(tk.Tk):
         self.debug_widget = None
         self.bind_all("<Key-d>", lambda e: self.toggle_debug())
         self.bind_all("<Key-D>", lambda e: self.toggle_debug())
+
         self.touch_feedback = TouchFeedbackManager(self)
+        self.supabase = create_client(url, key)
 
-        # ---- Data model ----
-        # stock: integer count; sales: integer count; best_seller (bool) computed from sales
-        self.catalog = {
-            "fruit1": {"name": "Watermelon", "price": 60.0, "stock": 5,  "sales": 0, "best_seller": False, "asset_name": "watermelon"},
-            "fruit2": {"name": "Melon",     "price": 50.0, "stock": 5,  "sales": 0, "best_seller": False, "asset_name": "melon"},
-            "fruit3": {"name": "Mango",     "price": 70.0, "stock": 5,  "sales": 1, "best_seller": False, "asset_name": "mango"},
-            "fruit4": {"name": "Dragonfruit","price": 80.0,"stock": 0,  "sales": 1, "best_seller": False, "asset_name": "dragonfruit"},
-            "fruit5": {"name": "Pineapple", "price": 75.0, "stock": 0,  "sales": 0, "best_seller": False, "asset_name": "pineapple"},
-        }
-
-        self.addons = {
-            "pearls": {"name": "Black Pearls", "price": 15.0, "stock": 3, "sales": 0},
-            "cheese": {"name": "Cheese", "price": 20.0, "stock": 3, "sales": 0},
-        }
-
-        # Ingredients (always consumed with orders): ice, milk, sugar (stock only)
-        self.ingredients = {
-            "ice": {"name": "Ice", "stock": 3},
-            "milk": {"name": "Milk", "stock": 3},
-            "sugar": {"name": "Sugar", "stock": 3},
-        }
+        # Load remote data before building the UI
+        self.load_remote_data()
 
         # Track total income
         self.total_income = 0.0
@@ -512,8 +474,78 @@ class App(tk.Tk):
         # ensure best-sellers are correct on start
         self.update_best_sellers()
 
-        # show welcome
+        # First Screen shown: Welcome Screen, change for testing
         self.show_frame(WelcomeScreen, pause=True)
+
+    # Database
+    def load_remote_data(self):
+        self.log("=== Loading remote inventory from Supabase ===")
+
+        # Fruits
+        res = self.supabase.table("fruits").select("*").execute()
+        fruit_rows = getattr(res, "data", []) or []
+        self.log(f"fruits rows returned: {len(fruit_rows)}")
+
+        self.catalog = {}
+        for i, row in enumerate(sorted(fruit_rows, key=lambda r: r["id"]), start=1):
+            self.log(f"fruit row {i}: {row}")
+            try:
+                key = f"fruit{i}"
+                self.catalog[key] = {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "price": row["price"],
+                    "stock": row["stock"],
+                    "sales": row["sales"],
+                    "best_seller": row.get("best_seller", False),
+                    "asset_name": row["asset_name"],
+                }
+                self.log(f"Loaded fruit key mapping: {key} -> {row['name']} / {row['asset_name']}")
+            except Exception as e:
+                self.log(f"fruit row {i} could not be loaded: {e}")
+
+        # Add-ons
+        res = self.supabase.table("addons").select("*").execute()
+        addon_rows = getattr(res, "data", []) or []
+        self.log(f"addons rows returned: {len(addon_rows)}")
+
+        self.addons = {}
+        for i, row in enumerate(addon_rows, start=1):
+            self.log(f"addon row {i}: {row}")
+            try:
+                key = row["name"].lower().replace(" ", "")
+                self.addons[key] = {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "price": row["price"],
+                    "stock": row["stock"],
+                    "sales": row["sales"],
+                }
+            except Exception as e:
+                self.log(f"addon row {i} could not be loaded: {e}")
+
+        # Ingredients
+        res = self.supabase.table("ingredients").select("*").execute()
+        ingredient_rows = getattr(res, "data", []) or []
+        self.log(f"ingredients rows returned: {len(ingredient_rows)}")
+
+        self.ingredients = {}
+        for i, row in enumerate(ingredient_rows, start=1):
+            self.log(f"ingredient row {i}: {row}")
+            try:
+                key = row["name"].lower()
+                self.ingredients[key] = {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "stock": row["stock"],
+                }
+            except Exception as e:
+                self.log(f"ingredient row {i} could not be loaded: {e}")
+
+        self.log(f"Loaded catalog count: {len(self.catalog)}")
+        self.log(f"Loaded addons count: {len(self.addons)}")
+        self.log(f"Loaded ingredients count: {len(self.ingredients)}")
+        self.log("=== Finished loading remote inventory ===")
 
     # -------------------------
     # logging / debug helpers
@@ -556,28 +588,47 @@ class App(tk.Tk):
         self.log(f"Best-seller updated (max sales={max_sales})")
 
     def record_sale(self):
-        """
-        Called when payment is confirmed. Decrement stock by 1 for each selected fruit (never negative).
-        Increment sales for each selected fruit. Recompute best sellers and refresh overlays.
-        """
-        if not self.selected_fruits:
-            self.log("record_sale called but no selected fruits")
-            return
-
         self.log(f"Recording sale for: {self.selected_fruits}")
+        self.log(f"Recording sale for add-ons: {list(self.selected_addons)}")
+        
+        # Fruits
         for k in self.selected_fruits:
             item = self.catalog.get(k)
             if not item:
                 continue
-            # decrement stock safely
-            stock = item.get("stock", 0)
-            if stock > 0:
-                item["stock"] = stock - 1
-            else:
-                item["stock"] = 0
-            # increment sales
+
+            item["stock"] = max(0, item.get("stock", 0) - 1)
             item["sales"] = item.get("sales", 0) + 1
-            self.log(f"Updated {k}: stock={item['stock']}, sales={item['sales']}")
+
+            # SAVE TO SUPABASE
+            self.supabase.table("fruits").update({
+                "stock": item["stock"],
+                "sales": item["sales"]
+            }).eq("id", item["id"]).execute()
+        # Add-ons
+        for k in self.selected_addons:
+            item = self.addons.get(k)
+            if not item:
+                continue
+
+            item["stock"] = max(0, item.get("stock", 0) - 1)
+            item["sales"] = item.get("sales", 0) + 1
+
+            self.supabase.table("addons").update({
+                "stock": item["stock"],
+                "sales": item["sales"]
+            }).eq("id", item["id"]).execute()
+        # Ingredients
+        for k, item in self.ingredients.items():
+            item["stock"] = max(0, item.get("stock", 0) - 1)
+
+            self.supabase.table("ingredients").update({
+                "stock": item["stock"]
+            }).eq("id", item["id"]).execute()
+        # Income
+        total = self.calculate_total()
+        self.total_income += total
+        self.log("Added Income: " + money_str(total))
 
         # update best sellers
         self.update_best_sellers()
@@ -1015,13 +1066,13 @@ class WelcomeScreen(tk.Frame):
             self.controller.log("Admin panel shown")
 
     def on_screen_click(self, event):
-        # ignore taps while admin panel is visible (prevent accidental nav that hides admin)
+        # ignore taps while admin panel is visible but still show touch feedback cuz why not
         if getattr(self, "admin_panel_visible", False):
             self.controller.log("Screen tapped but admin panel visible — ignoring")
             return "break"
         else:
             self.controller.log("Screen tapped")
-            # leaving welcome will let show_frame restore the standard inactivity timeout
+            # leaving welcome will let show_frame restore the standard inactivity timeout 
             self.controller.show_frame(FruitSelectionScreen)
 
     def tkraise(self, *args, **kwargs):
@@ -2247,17 +2298,10 @@ class ErrorScreen(tk.Frame):
         # Canvas / background (keep touch feedback binding)
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        try:
-            self.bg_img = load_image_tk("errorScreen.png", resize_to=(SCREEN_W, SCREEN_H))
-            self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
-        except Exception:
-            # fallback visual
-            self.canvas.create_rectangle(0, 0, SCREEN_W, SCREEN_H, fill="darkred")
-            self.canvas.create_text(SCREEN_W // 2, SCREEN_H // 2,
-                                    text="ERROR: Out of stock",
-                                    fill="#000000", font=("Arial", 28, "bold"))
 
-        # keep touch feedback binding (do not remove)
+        self.bg_img = load_image_tk("errorScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
+
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
         # Hidden admin zone (top-right). Use same size as WelcomeScreen for consistency.
@@ -2284,27 +2328,22 @@ class ErrorScreen(tk.Frame):
     # Admin UI builder (same pattern as WelcomeScreen)
     # -------------------------
     def _build_admin_ui(self):
-        """Populate the admin panel with stock/sales rows and admin controls."""
         panel = self.admin_panel
-
         # Clear any previous widgets (safe to call multiple times)
         for w in panel.winfo_children():
             try:
                 w.destroy()
             except Exception:
                 pass
-
         # Title
-        title = tk.Label(panel, text="ADMIN PANEL", font=("Arial", 18, "bold"), bg="#222", fg="white")
-        title.place(relx=0.5, y=12, anchor="n")
-
+        title = tk.Label(panel, text="ADMIN PANEL", font=("Arial", 15, "bold"), bg="#222", fg="white")
+        title.place(relx=0.5, y=-2, anchor="n")
         # Close button (hide admin)
         close_btn = tk.Button(panel, text="Close", command=self.toggle_admin)
-        close_btn.place(x=panel.winfo_reqwidth() - 15, y=5, width=60, height=28, anchor="ne")
+        close_btn.place(x=panel.winfo_reqwidth() - 10, y=0, anchor="ne")
         # Exit button (closes app)
         exit_btn = tk.Button(panel, text="Exit", command=lambda: self.controller.destroy())
-        exit_btn.place(x=panel.winfo_reqwidth() - 15, y=panel.winfo_reqheight() - 15, anchor="se")
-
+        exit_btn.place(x=panel.winfo_reqwidth() - 10, y=panel.winfo_reqheight() - 10, anchor="se")
         # Fullscreen toggle
         def _toggle_fullscreen():
             try:
@@ -2320,80 +2359,22 @@ class ErrorScreen(tk.Frame):
                 self._fs_btn.config(text="Fullscreen: OFF" if new_state else "Fullscreen: ON")
             except Exception as e:
                 self.controller.log(f"Failed to toggle fullscreen: {e}")
-
         self._fs_btn = tk.Button(panel, text=("Fullscreen: ON" if getattr(self.controller, "is_fullscreen", False) else "Fullscreen: OFF"), command=_toggle_fullscreen)
-        self._fs_btn.place(x=5, y=5, anchor="nw")
-        
+        self._fs_btn.place(x=0, y=0, anchor="nw")
+        # Stock Recheck button
         self.recheck_btn = tk.Button(
             self.admin_panel,
             text="Recheck Stock",
             command=self.recheck_stock
             )
-        self.recheck_btn.place(x=5, y=panel.winfo_reqheight() - 15, anchor="sw")
+        self.recheck_btn.place(x=0, y=panel.winfo_reqheight() - 10, anchor="sw")
 
         # Admin rows area (where each fruit/add-on row will be shown)
         rows_frame = tk.Frame(panel, bg="#222")
-        rows_frame.place(relx=0.5, rely=0.12, anchor="n", relwidth=0.96, relheight=0.78)
+        rows_frame.place(relx=0.5, rely=0.06, anchor="n", relwidth=0.98, relheight=0.88)
 
-        # store the parent so _refresh_admin_rows can populate into it
         self.admin_rows_parent = rows_frame
-
-        # Try to populate rows using your existing helper (keeps single source of truth)
-        if hasattr(self, "_refresh_admin_rows"):
-            try:
-                self._refresh_admin_rows()
-            except Exception as e:
-                self.controller.log(f"Welcome: _refresh_admin_rows() error: {e}")
-                # fallback display if the helper exists but fails
-                for w in rows_frame.winfo_children():
-                    w.destroy()
-                tk.Label(rows_frame, text="(admin refresh failed)", bg="#222", fg="white").pack()
-        else:
-            # No helper found: create a minimal interactive fallback
-            for w in rows_frame.winfo_children():
-                w.destroy()
-
-            def make_row(parent, row_idx, label_text, stock_val_getter, change_fn):
-                r = tk.Frame(parent, bg="#222")
-                r.grid_rowconfigure(0, weight=1)
-                r.grid_columnconfigure(0, weight=1)
-                r.grid(row=row_idx, column=0, sticky="ew", pady=2)
-
-                lbl = tk.Label(r, text=label_text, bg="#222", fg="white", anchor="w")
-                lbl.pack(side="left", padx=6)
-
-                stock_var = tk.StringVar(value=str(stock_val_getter()))
-                stock_label = tk.Label(r, textvariable=stock_var, bg="#222", fg="white", width=6)
-                stock_label.pack(side="left", padx=6)
-
-                def on_change(delta):
-                    try:
-                        change_fn(delta)
-                        stock_var.set(str(stock_val_getter()))
-                    except Exception as e:
-                        self.controller.log(f"Admin change error: {e}")
-
-                minus = tk.Button(r, text="-", command=lambda: on_change(-1))
-                minus.pack(side="left")
-                plus = tk.Button(r, text="+", command=lambda: on_change(1))
-                plus.pack(side="left")
-
-            # populate fruits
-            row = 0
-            catalog = getattr(self.controller, "catalog", {})
-            for k, info in catalog.items():
-                name = info.get("name", k)
-                make_row(rows_frame, row, f"{name} (fruit)", lambda info=info: int(info.get("stock", 0)),
-                         lambda d, info=info: info.__setitem__("stock", max(0, int(info.get("stock", 0)) + d)))
-                row += 1
-
-            # populate addons
-            addons = getattr(self.controller, "addons", {})
-            for k, info in addons.items():
-                name = info.get("name", k)
-                make_row(rows_frame, row, f"{name} (add-on)", lambda info=info: int(info.get("stock", 0)),
-                         lambda d, info=info: info.__setitem__("stock", max(0, int(info.get("stock", 0)) + d)))
-                row += 1
+        self._refresh_admin_rows()
 
     def _refresh_admin_rows(self):
         """Recreate the admin rows listing each fruit, its stock, sales, add-ons, ingredients, and controls."""
@@ -2404,12 +2385,12 @@ class ErrorScreen(tk.Frame):
 
         # heading row
         hdr = tk.Frame(parent, bg="#222")
-        hdr.pack(fill="x", pady=(2,6))
-        tk.Label(hdr, text="Item", width=20, anchor="w", bg="#333", fg="white").pack(side="left", padx=4)
+        hdr.pack(fill="x", pady=1)
+        tk.Label(hdr, text="Fruits", width=20, anchor="w", bg="#333", fg="white").pack(side="left", padx=4)
         tk.Label(hdr, text="Stock", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
         tk.Label(hdr, text="Sales", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
         tk.Label(hdr, text="Best", width=6, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(hdr, text="Controls", width=28, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(hdr, text="Controls", width=41, anchor="center", bg="#333", fg="white").pack(fill="x", padx=4)
 
         # rows for each fruit
         for key, meta in self.controller.catalog.items():
@@ -2441,17 +2422,17 @@ class ErrorScreen(tk.Frame):
                 return lambda: self._admin_change_sales(k, -1)
 
             btn_dec_stock = tk.Button(controls, text="-Stock", command=make_dec_stock(key), width=8)
-            btn_dec_stock.pack(side="left", padx=2)
+            btn_dec_stock.pack(side="left", padx=1)
             btn_inc_stock = tk.Button(controls, text="+Stock", command=make_inc_stock(key), width=8)
-            btn_inc_stock.pack(side="left", padx=2)
+            btn_inc_stock.pack(side="left", padx=1)
             btn_dec_sales = tk.Button(controls, text="-Sales", command=make_dec_sales(key), width=8)
-            btn_dec_sales.pack(side="left", padx=6)
+            btn_dec_sales.pack(side="left", padx=1)
             btn_inc_sales = tk.Button(controls, text="+Sales", command=make_inc_sales(key), width=8)
-            btn_inc_sales.pack(side="left", padx=2)
+            btn_inc_sales.pack(side="left", padx=1)
 
         # Separator for addons
-        sep = tk.Label(parent, text="Add-Ons", bg="#222", fg="#fff", anchor="w")
-        sep.pack(fill="x", pady=(8,4), padx=6)
+        sep = tk.Label(parent, text="Add-Ons", bg="#333", fg="#fff", anchor="w")
+        sep.pack(fill="x", pady=1, padx=6)
 
         for key, meta in self.controller.addons.items():
             row = tk.Frame(parent, bg="#222")
@@ -2462,34 +2443,37 @@ class ErrorScreen(tk.Frame):
             sales_lbl = tk.Label(row, text=str(meta.get("sales", 0)), width=8, anchor="center", bg="#222", fg="white")
             sales_lbl.pack(side="left", padx=4)
             controls = tk.Frame(row, bg="#222"); controls.pack(side="left", padx=4)
-            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_addon_stock(k, -1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_addon_stock(k, +1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="-Sales", command=lambda k=key: self._admin_change_addon_sales(k, -1), width=8).pack(side="left", padx=6)
-            tk.Button(controls, text="+Sales", command=lambda k=key: self._admin_change_addon_sales(k, +1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_addon_stock(k, -1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_addon_stock(k, +1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="-Sales", command=lambda k=key: self._admin_change_addon_sales(k, -1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="+Sales", command=lambda k=key: self._admin_change_addon_sales(k, +1), width=8).pack(side="left", padx=1)
 
         # Separator for ingredients (stock only)
-        sep2 = tk.Label(parent, text="Ingredients (stock only)", bg="#222", fg="#fff", anchor="w")
-        sep2.pack(fill="x", pady=(8,4), padx=6)
+        sep2 = tk.Label(parent, text="Base Ingredients", bg="#333", fg="#fff", anchor="w")
+        sep2.pack(fill="x", pady=1, padx=6)
 
         for key, meta in self.controller.ingredients.items():
             row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=2)
+            row.pack(fill="x", pady=1)
             tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
             stock_lbl = tk.Label(row, text=str(meta.get("stock", 0)), width=8, anchor="center", bg="#222", fg="white")
             stock_lbl.pack(side="left", padx=4)
             controls = tk.Frame(row, bg="#222"); controls.pack(side="left", padx=4)
-            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, -1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, +1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, -1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, +1), width=8).pack(side="left", padx=1)
 
         # Income display and reset
-        income_row = tk.Frame(parent, bg="#222")
-        income_row.pack(fill="x", pady=(8,2))
-        tk.Label(income_row, text="Total Income:", width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
-        tk.Label(income_row, text=f"{self.controller.total_income:.2f}", width=12, anchor="w", bg="#222", fg="#FFD700").pack(side="left", padx=4)
-        tk.Button(income_row, text="Reset Income", command=lambda: self._admin_reset_income(), width=12).pack(side="left", padx=6)
+        income_row = tk.Frame(parent, bg="#333")
+        income_row.pack(fill="x", pady=1)
+        tk.Label(income_row, text="Total Income:", anchor="w", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(income_row, text=f"{self.controller.total_income:.2f}", width=30, anchor="center", bg="#222", fg="#FFC800").pack(side="left", padx=10)
+        tk.Button(income_row, text="Reset Income", command=lambda: self._admin_reset_income(), width=12).pack(side="left", padx=10)
 
     def recheck_stock(self):
         if not self.controller.check_error_state():
+            self.admin_panel.place_forget()
+            self.admin_panel_visible = False
+            self.controller.log("Error admin panel hidden")
             self.controller.show_frame(WelcomeScreen, pause=True)
 
     def _admin_change_stock(self, key, delta):
@@ -2634,5 +2618,4 @@ class ErrorScreen(tk.Frame):
 # -------------------------
 if __name__ == "__main__":
     app = App()
-    app.log("App started (updated with admin panel)")
     app.mainloop()
