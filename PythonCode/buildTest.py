@@ -4,6 +4,7 @@ import os
 from decimal import Decimal, ROUND_HALF_UP
 import time
 import math
+import uuid
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageTk
     _HAS_PIL = True
@@ -431,6 +432,9 @@ class App(tk.Tk):
         # Load remote data before building the UI
         self.load_remote_data()
 
+        # Database Payment tracking
+        self.payment_method = None
+
         # Track total income
         self.total_income = 0.0
 
@@ -642,6 +646,16 @@ class App(tk.Tk):
             except Exception as e:
                 self.log(f"Failed to refresh FruitSelection overlays after sale: {e}")
 
+        sale_row = {
+        "sale_id": str(uuid.uuid4()),
+        "total_price": total,
+        "payment_method": self.payment_method or "Unknown",
+        "selected_fruits": ", ".join(self.catalog[k]["name"] for k in self.selected_fruits),
+        "selected_addons": ", ".join(self.addons[k]["name"] for k in self.selected_addons) if self.selected_addons else None,
+        }
+
+        self.supabase.table("sales").insert(sale_row).execute()
+
     # -------------------------
     # frame switching & timer
     # -------------------------
@@ -707,9 +721,22 @@ class App(tk.Tk):
         self.show_frame(WelcomeScreen, pause=True)
 
     def calculate_total(self):
-        base = sum(self.catalog[k]["price"] for k in self.selected_fruits)
-        addons = sum(self.addons[k]["price"] for k in self.selected_addons)
-        return float(Decimal(base + addons).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+        fruit_total = sum(self.catalog[k]["price"] for k in self.selected_fruits)
+        addon_total = sum(self.addons[k]["price"] for k in self.selected_addons)
+
+        fruit_count = len(self.selected_fruits)
+
+        # Reduce price based on amount of fruit selected
+        fruit_discount = {
+            1: 1.00,  # no discount
+            2: 0.80,  
+            3: 0.60,  
+        }.get(fruit_count, 1.00)
+
+        discounted_fruit_total = fruit_total * fruit_discount
+        self.log("Original Amount: " + money_str(fruit_total + addon_total) + "| Discounted Amount: " + money_str(discounted_fruit_total + addon_total))
+        # round up to peso dahil sino naman nagdadala ng centavos
+        return math.ceil(discounted_fruit_total + addon_total)
         
     def check_error_state(self):
         """Return True if an error condition exists (ingredients out of stock OR all fruits out of stock)."""
@@ -1351,8 +1378,18 @@ class FruitSelectionScreen(tk.Frame):
         if len(self.controller.selected_fruits) == 0:
             self.controller.log("Next pressed but no fruits selected -> ignored")
             return
-        self.controller.log("Proceeding to AddOnScreen")
-        self.controller.show_frame(AddOnScreen)
+
+        any_addon_in_stock = any(
+            item.get("stock", 0) > 0
+            for item in self.controller.addons.values()
+        )
+
+        if any_addon_in_stock:
+            self.controller.log("Proceeding to AddOnScreen")
+            self.controller.show_frame(AddOnScreen)
+        else:
+            self.controller.log("No add-ons in stock -> skipping AddOnScreen and going to SummaryScreen")
+            self.controller.show_frame(SummaryScreen, timeout_ms=self.controller.default_timeout_ms * 5)
 
 class AddOnScreen(tk.Frame):
     def __init__(self, parent, controller):
@@ -1389,12 +1426,37 @@ class AddOnScreen(tk.Frame):
         # tag name used for selection highlight overlays
         self.sel_overlay_tag = "addon_sel_overlay"
 
+        self._addon_overlay_cache = {}
+        self._addon_overlay_items = {}
+        self.addon_stock_overlay_tag = "addon_stock_overlay"
+
+        try:
+            for key, asset_base in (("pearls", "pearls"), ("cheese", "cheese")):
+                fname = f"{asset_base}Stock.png"
+                if file_exists(fname):
+                    img = Image.open(os.path.join(ASSETS_DIR, fname))
+                    photo = ImageTk.PhotoImage(img)  # full-screen image, no resize needed
+                    self._addon_overlay_cache[key] = photo
+        except Exception as e:
+            self.controller.log(f"Addon stock overlay preload error: {e}")
+            self._addon_overlay_cache = {}
+
         # initial render
         self.update_addon_states()
         self.render_summary()
 
     def toggle_addon(self, key):
         self.controller.log(f"Clicked addon: {key}")
+
+        item = self.controller.addons.get(key)
+        if not item:
+            self.controller.log(f"Unknown addon key: {key}")
+            return
+
+        if item.get("stock", 0) <= 0:
+            self.controller.log(f"{item['name']} is out of stock — ignoring selection")
+            return
+
         if key in self.controller.selected_addons:
             self.controller.selected_addons.remove(key)
             self.controller.log(f"Removed addon {key}")
@@ -1402,35 +1464,53 @@ class AddOnScreen(tk.Frame):
             self.controller.selected_addons.add(key)
             self.controller.log(f"Added addon {key}")
 
-        # update visual state immediately
         self.update_addon_states()
         self.render_summary()
 
     def update_addon_states(self):
-        """Draw or remove yellow selection outlines for selected add-ons.
-        Selection outlines are created beneath the actual touch rects so they do not
-        steal pointer events (we lower them under the touch rect item IDs).
-        """
         # remove previous selection overlays
         try:
             self.canvas.delete(self.sel_overlay_tag)
         except Exception:
             pass
 
+        # remove previous stock overlays
+        try:
+            for items in getattr(self, "_addon_overlay_items", {}).values():
+                for it in items:
+                    safe_delete(self.canvas, it)
+        except Exception:
+            pass
+        self._addon_overlay_items = {}
+
         for key, (x1, y1, x2, y2) in self.addon_zones.items():
+            meta = self.controller.addons.get(key, {})
+            zone_id = self.addon_zone_items.get(key)
+
+            # out-of-stock overlay
+            if meta.get("stock", 0) <= 0:
+                photo = self._addon_overlay_cache.get(key)
+                if photo is not None:
+                    item = self.canvas.create_image(0, 0, anchor="nw", image=photo)
+                    try:
+                        self.canvas.itemconfigure(item, state="disabled")
+                    except Exception:
+                        pass
+                    self._addon_overlay_items.setdefault(key, []).append(item)
+
+            # selected outline
             if key in self.controller.selected_addons:
-                # inset the highlight slightly so it looks like your fruit selection highlights
                 inset = 4
                 sx1, sy1, sx2, sy2 = x1 + inset, y1 + inset, x2 - inset, y2 - inset
-                sel_id = self.canvas.create_rectangle(sx1, sy1, sx2, sy2, outline="yellow", width=4, tags=(self.sel_overlay_tag,))
-                # Lower the selection rectangle beneath the corresponding touch rect so the touch rect stays top-most
-                # (this prevents the highlight from blocking clicks)
+                sel_id = self.canvas.create_rectangle(
+                    sx1, sy1, sx2, sy2,
+                    outline="yellow", width=4,
+                    tags=(self.sel_overlay_tag,)
+                )
                 try:
-                    zone_id = self.addon_zone_items.get(key)
                     if zone_id:
                         self.canvas.tag_lower(sel_id, zone_id)
                 except Exception:
-                    # if lowering fails, ignore — selection still visible but may block clicks (unlikely)
                     pass
 
     def render_summary(self):
@@ -1464,7 +1544,11 @@ class SummaryScreen(tk.Frame):
         # Back / Next invisible zones (keeps existing behavior)
         back_rect = self.canvas.create_rectangle(20, 520, 140, 580, outline="")
         next_rect = self.canvas.create_rectangle(880, 520, 1020, 580, outline="")
-        self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: self.controller.log("Back pressed on Summary") or self.controller.show_frame(AddOnScreen))
+        # Back button should check if any add-ons are in stock to decide whether to go back to AddOnScreen or FruitSelectionScreen  
+        self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: (self.controller.log("Back pressed on Summary"),
+            self.controller.show_frame(AddOnScreen)
+            if any(item.get("stock", 0) > 0 for item in self.controller.addons.values())
+            else self.controller.show_frame(FruitSelectionScreen)))
         self.canvas.tag_bind(next_rect, "<Button-1>", lambda e: self.controller.log("Next pressed on Summary") or self.controller.show_frame(PaymentSelectionScreen, timeout_ms=self.controller.default_timeout_ms * 5))
 
         # choose font: use Inter if installed, otherwise fallback to Arial
@@ -1796,6 +1880,7 @@ class CashMethodScreen(tk.Frame):
         total = self.controller.calculate_total()
         if self.entered_amount + 0.0001 >= total:
             # record sale then auto-proceed after short delay
+            self.controller.payment_method = "Cash"
             self.controller.record_sale()
             self.cancel_auto_proceed()
             self._auto_proceed_job = self.after(1000, lambda: self.controller.show_frame(ProcessingScreen, pause=True))
@@ -1876,6 +1961,7 @@ class PaypalMethodScreen(tk.Frame):
     def confirm_paid(self):
         self.controller.log("I PAID pressed (Paypal) — recording sale and proceeding to Processing")
         # record sale
+        self.controller.payment_method = "PayPal"
         self.controller.record_sale()
         self.controller.show_frame(ProcessingScreen, pause=True)
 
