@@ -408,6 +408,339 @@ class SummaryBar(tk.Frame):
             except Exception:
                 pass
 
+class AdminPanel(tk.Frame):
+    """
+    Shared admin panel for WelcomeScreen and ErrorScreen.
+
+    - Reuses the same row rendering for fruits / add-ons / ingredients / income
+    - Has Close / Exit / Fullscreen buttons
+    - Optional Recheck Stock button
+    - Can be shown/hidden/toggled by the screen that owns it
+    """
+
+    def __init__(
+        self,
+        parent,
+        controller,
+        *,
+        width=750,
+        height=585,
+        show_recheck_stock=True,
+        return_to_cls=None,
+        title_text="ADMIN PANEL",
+    ):
+        super().__init__(
+            parent,
+            width=width,
+            height=height,
+            bg="#222",
+            bd=4,
+            relief="raised",
+        )
+        self.controller = controller
+        self.panel_width = width
+        self.panel_height = height
+        self.show_recheck_stock = show_recheck_stock
+        self.return_to_cls = return_to_cls
+        self.title_text = title_text
+
+        self.visible = False
+        self.admin_visible = False  # compatibility alias
+        self._fs_btn = None
+        self._recheck_btn = None
+        self.admin_rows_parent = None
+
+        self._build_ui()
+
+    def _build_ui(self):
+        # Clear any previous widgets
+        for w in self.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
+        # Title
+        title = tk.Label(
+            self,
+            text=self.title_text,
+            font=("Arial", 15, "bold"),
+            bg="#222",
+            fg="white",
+        )
+        title.place(relx=0.5, y=2, anchor="n")
+
+        # Close button
+        close_btn = tk.Button(self, text="Close", command=self.hide)
+        close_btn.place(x=self.panel_width - 10, y=0, anchor="ne")
+
+        # Exit button
+        exit_btn = tk.Button(self, text="Exit", command=lambda: self.controller.destroy())
+        exit_btn.place(x=self.panel_width - 10, y=self.panel_height - 10, anchor="se")
+
+        # Fullscreen toggle
+        self._fs_btn = tk.Button(self, text="", command=self._toggle_fullscreen)
+        self._fs_btn.place(x=0, y=0, anchor="nw")
+
+        # Optional Recheck Stock button
+        if self.show_recheck_stock:
+            self._recheck_btn = tk.Button(self, text="Recheck Stock", command=self._on_recheck_stock)
+            self._recheck_btn.place(x=0, y=self.panel_height - 10, anchor="sw")
+        else:
+            self._recheck_btn = None
+
+        # Rows area
+        rows_top = 0.075 if self.show_recheck_stock else 0.03
+        rows_height = 0.83 if self.show_recheck_stock else 0.90
+        rows_frame = tk.Frame(self, bg="#222")
+        rows_frame.place(relx=0.5, rely=rows_top, anchor="n", relwidth=0.98, relheight=rows_height)
+        self.admin_rows_parent = rows_frame
+
+        self.refresh()
+
+    def show(self):
+        self.refresh()
+        self.place(relx=0.5, rely=0.5, anchor="center")
+        self.visible = True
+        self.admin_visible = True
+        self._update_fs_button_text()
+
+    def hide(self):
+        self.place_forget()
+        self.visible = False
+        self.admin_visible = False
+
+    def toggle(self):
+        if self.visible:
+            self.hide()
+        else:
+            self.show()
+
+    def refresh(self):
+        # keep best-seller flags current before drawing
+        try:
+            self.controller.update_best_sellers()
+        except Exception:
+            pass
+
+        self._update_fs_button_text()
+        self._refresh_admin_rows()
+
+    def _update_fs_button_text(self):
+        if not self._fs_btn:
+            return
+        try:
+            is_fullscreen = bool(getattr(self.controller, "is_fullscreen", False))
+            self._fs_btn.config(text="Fullscreen: OFF" if is_fullscreen else "Fullscreen: ON")
+        except Exception:
+            pass
+
+    def _toggle_fullscreen(self):
+        try:
+            new_state = not bool(getattr(self.controller, "is_fullscreen", False))
+            try:
+                self.controller.attributes("-fullscreen", new_state)
+            except Exception:
+                try:
+                    self.controller.attributes("-zoomed", new_state)
+                except Exception:
+                    pass
+            self.controller.is_fullscreen = new_state
+            self._update_fs_button_text()
+        except Exception as e:
+            self.controller.log(f"Failed to toggle fullscreen: {e}")
+
+    def _refresh_admin_rows(self):
+        parent = self.admin_rows_parent
+        if parent is None:
+            return
+
+        for w in parent.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
+        # Header
+        hdr = tk.Frame(parent, bg="#222")
+        hdr.pack(fill="x", pady=(2, 6))
+
+        tk.Label(hdr, text="Item", width=20, anchor="w", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(hdr, text="Stock", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(hdr, text="Sales", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(hdr, text="Best", width=6, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
+        tk.Label(hdr, text="Controls", width=28, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
+
+        # Fruits
+        for key, meta in getattr(self.controller, "catalog", {}).items():
+            row = tk.Frame(parent, bg="#222")
+            row.pack(fill="x", pady=2)
+
+            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
+
+            stock_lbl = tk.Label(row, text=str(meta.get("stock", meta.get("in_stock", ""))), width=8, anchor="center", bg="#222", fg="white")
+            stock_lbl.pack(side="left", padx=4)
+
+            sales_lbl = tk.Label(row, text=str(meta.get("sales", 0)), width=8, anchor="center", bg="#222", fg="white")
+            sales_lbl.pack(side="left", padx=4)
+
+            best_lbl = tk.Label(row, text="✓" if meta.get("best_seller", False) else "", width=6, anchor="center", bg="#222", fg="#0f0")
+            best_lbl.pack(side="left", padx=4)
+
+            controls = tk.Frame(row, bg="#222")
+            controls.pack(side="left", padx=4)
+
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._change_fruit_stock(k, -1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._change_fruit_stock(k, +1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_fruit_sales(k, -1), width=8).pack(side="left", padx=6)
+            tk.Button(controls, text="+Sales", command=lambda k=key: self._change_fruit_sales(k, +1), width=8).pack(side="left", padx=2)
+
+        # Add-ons
+        sep = tk.Label(parent, text="Add-Ons", bg="#222", fg="#fff", anchor="w")
+        sep.pack(fill="x", pady=(8, 4), padx=6)
+
+        for key, meta in getattr(self.controller, "addons", {}).items():
+            row = tk.Frame(parent, bg="#222")
+            row.pack(fill="x", pady=2)
+
+            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
+
+            stock_lbl = tk.Label(row, text=str(meta.get("stock", 0)), width=8, anchor="center", bg="#222", fg="white")
+            stock_lbl.pack(side="left", padx=4)
+
+            sales_lbl = tk.Label(row, text=str(meta.get("sales", 0)), width=8, anchor="center", bg="#222", fg="white")
+            sales_lbl.pack(side="left", padx=4)
+
+            controls = tk.Frame(row, bg="#222")
+            controls.pack(side="left", padx=4)
+
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._change_addon_stock(k, -1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._change_addon_stock(k, +1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_addon_sales(k, -1), width=8).pack(side="left", padx=6)
+            tk.Button(controls, text="+Sales", command=lambda k=key: self._change_addon_sales(k, +1), width=8).pack(side="left", padx=2)
+
+        # Ingredients
+        sep2 = tk.Label(parent, text="Ingredients (stock only)", bg="#222", fg="#fff", anchor="w")
+        sep2.pack(fill="x", pady=(8, 4), padx=6)
+
+        for key, meta in getattr(self.controller, "ingredients", {}).items():
+            row = tk.Frame(parent, bg="#222")
+            row.pack(fill="x", pady=2)
+
+            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
+
+            stock_lbl = tk.Label(row, text=str(meta.get("stock", 0)), width=8, anchor="center", bg="#222", fg="white")
+            stock_lbl.pack(side="left", padx=4)
+
+            controls = tk.Frame(row, bg="#222")
+            controls.pack(side="left", padx=4)
+
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._change_ingredient_stock(k, -1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._change_ingredient_stock(k, +1), width=8).pack(side="left", padx=2)
+
+        # Income
+        income_row = tk.Frame(parent, bg="#222")
+        income_row.pack(fill="x", pady=(8, 2))
+
+        tk.Label(income_row, text="Total Income:", width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
+        tk.Label(
+            income_row,
+            text=f"{getattr(self.controller, 'total_income', 0.0):.2f}",
+            width=12,
+            anchor="w",
+            bg="#222",
+            fg="#FFD700",
+        ).pack(side="left", padx=4)
+
+        tk.Button(income_row, text="Reset Income", command=self._reset_income, width=12).pack(side="left", padx=6)
+
+    def _refresh_fruit_screen(self):
+        fs = self.controller.frames.get(FruitSelectionScreen)
+        if fs:
+            try:
+                fs.update_best_sellers() if hasattr(fs, "update_best_sellers") else None
+            except Exception:
+                pass
+            try:
+                fs.update_overlays()
+            except Exception:
+                pass
+            try:
+                fs.render_summary()
+            except Exception:
+                pass
+
+    def _change_fruit_stock(self, key, delta):
+        item = self.controller.catalog.get(key)
+        if not item:
+            return
+        item["stock"] = max(0, int(item.get("stock", 0)) + delta)
+        self.controller.log(f"Admin changed stock for {key}: {delta} -> {item['stock']}")
+        self.controller.update_best_sellers()
+        self._refresh_fruit_screen()
+        self.refresh()
+
+    def _change_fruit_sales(self, key, delta):
+        item = self.controller.catalog.get(key)
+        if not item:
+            return
+        item["sales"] = max(0, int(item.get("sales", 0)) + delta)
+        self.controller.log(f"Admin changed sales for {key}: {delta} -> {item['sales']}")
+        self.controller.update_best_sellers()
+        self._refresh_fruit_screen()
+        self.refresh()
+
+    def _change_addon_stock(self, key, delta):
+        item = self.controller.addons.get(key)
+        if not item:
+            return
+        item["stock"] = max(0, int(item.get("stock", 0)) + delta)
+        self.controller.log(f"Admin changed addon stock for {key}: {delta} -> {item['stock']}")
+        self.refresh()
+
+    def _change_addon_sales(self, key, delta):
+        item = self.controller.addons.get(key)
+        if not item:
+            return
+        item["sales"] = max(0, int(item.get("sales", 0)) + delta)
+        self.controller.log(f"Admin changed addon sales for {key}: {delta} -> {item['sales']}")
+        self.refresh()
+
+    def _change_ingredient_stock(self, key, delta):
+        item = self.controller.ingredients.get(key)
+        if not item:
+            return
+        item["stock"] = max(0, int(item.get("stock", 0)) + delta)
+        self.controller.log(f"Admin changed ingredient stock for {key}: {delta} -> {item['stock']}")
+        self.refresh()
+
+    def _reset_income(self):
+        self.controller.total_income = 0.0
+        self.controller.log("Admin reset total income")
+        self.refresh()
+
+    def _on_recheck_stock(self):
+        """
+        Recheck the inventory.
+        - If the system is healthy, optionally return to a target screen.
+        - If not, stay on the admin panel.
+        """
+        self.controller.log("Admin: rechecking stock")
+        self.controller.update_best_sellers()
+        self.refresh()
+
+        if self.return_to_cls is not None and not self.controller.check_error_state():
+            self.controller.log("Stock OK after recheck")
+            try:
+                self.controller.show_frame(self.return_to_cls, pause=True, skip_error_check=True)
+            except TypeError:
+                self.controller.show_frame(self.return_to_cls, pause=True)
+        else:
+            if self.controller.check_error_state():
+                self.controller.log("Stock still invalid — staying on admin panel")
+            else:
+                self.controller.log("Recheck complete")
+
 # -------------------------
 # Application
 # -------------------------
@@ -659,13 +992,13 @@ class App(tk.Tk):
     # -------------------------
     # frame switching & timer
     # -------------------------
-    def show_frame(self, cls, timeout_ms=None, pause=False):
+    def show_frame(self, cls, timeout_ms=None, pause=False, skip_error_check=False):
         frame = self.frames[cls]
 
         # BEFORE we raise the requested frame, check global error state
-        if cls is not ErrorScreen and self.check_error_state():
+        if not skip_error_check and cls is not ErrorScreen and self.check_error_state():
             self.log("Error detected: switching to ErrorScreen")
-            self.show_frame(ErrorScreen, pause=True)
+            self.show_frame(ErrorScreen, pause=True, skip_error_check=True)
             return
 
         frame = self.frames[cls]
@@ -723,6 +1056,7 @@ class App(tk.Tk):
     def calculate_total(self):
         fruit_total = sum(self.catalog[k]["price"] for k in self.selected_fruits)
         addon_total = sum(self.addons[k]["price"] for k in self.selected_addons)
+        base_total = 50
 
         fruit_count = len(self.selected_fruits)
 
@@ -734,9 +1068,9 @@ class App(tk.Tk):
         }.get(fruit_count, 1.00)
 
         discounted_fruit_total = fruit_total * fruit_discount
-        self.log("Original Amount: " + money_str(fruit_total + addon_total) + "| Discounted Amount: " + money_str(discounted_fruit_total + addon_total))
+        self.log("Original Amount: " + money_str(base_total + fruit_total + addon_total) + "| Discounted Amount: " + money_str(base_total + discounted_fruit_total + addon_total))
         # round up to peso dahil sino naman nagdadala ng centavos
-        return math.ceil(discounted_fruit_total + addon_total)
+        return math.ceil(base_total + discounted_fruit_total + addon_total)
         
     def check_error_state(self):
         """Return True if an error condition exists (ingredients out of stock OR all fruits out of stock)."""
@@ -780,321 +1114,22 @@ class WelcomeScreen(tk.Frame):
         x2, y2 = SCREEN_W, 100
         self.admin_zone = self.canvas.create_rectangle(x1, y1, x2, y2, outline="", fill="")
 
-        # bind admin zone to a handler that RETURNS "break" to stop propagation
-        self.canvas.tag_bind(self.admin_zone, "<Button-1>", self.on_admin_zone_click)
-
-        # Admin panel frame (overlay) - initially hidden
-        self.admin_panel = tk.Frame(self, width=700, height=575, bg="#222", bd=4, relief="raised")
-        # center it
+        self.admin_panel = AdminPanel(
+            self,
+            self.controller,
+            width=750,
+            height=575,
+            show_recheck_stock=True,
+            return_to_cls=None,   # stays on WelcomeScreen; just refreshes
+            )
         self.admin_panel.place(relx=0.5, rely=0.5, anchor="center")
-        self.admin_panel_visible = False
-        self.admin_panel.place_forget()  # hide initially
+        self.admin_panel.hide()
 
-        # build admin UI inside the panel
-        self._build_admin_ui()
-        self.admin_panel_visible = False
-
-    def _build_admin_ui(self):
-        """Populate the admin panel with stock/sales rows and admin controls."""
-        panel = self.admin_panel
-
-        # Clear any previous widgets (safe to call multiple times)
-        for w in panel.winfo_children():
-            try:
-                w.destroy()
-            except Exception:
-                pass
-
-        # Title
-        title = tk.Label(panel, text="ADMIN PANEL", font=("Arial", 18, "bold"), bg="#222", fg="white")
-        title.place(relx=0.5, y=12, anchor="n")
-
-        # Close button (hide admin)
-        close_btn = tk.Button(panel, text="Close", command=self.toggle_admin)
-        close_btn.place(x=panel.winfo_reqwidth() - 15, y=5, width=60, height=28, anchor="ne")
-        # Exit button (closes app)
-        exit_btn = tk.Button(panel, text="Exit", command=lambda: self.controller.destroy())
-        exit_btn.place(x=panel.winfo_reqwidth() - 15, y=panel.winfo_reqheight() - 15, anchor="se")
-
-        # Fullscreen toggle
-        def _toggle_fullscreen():
-            try:
-                new_state = not getattr(self.controller, "is_fullscreen", True)
-                try:
-                    self.controller.attributes("-fullscreen", new_state)
-                except Exception:
-                    try:
-                        self.controller.attributes("-zoomed", new_state)
-                    except Exception:
-                        pass
-                self.controller.is_fullscreen = new_state
-                self._fs_btn.config(text="Fullscreen: OFF" if new_state else "Fullscreen: ON")
-            except Exception as e:
-                self.controller.log(f"Failed to toggle fullscreen: {e}")
-
-        self._fs_btn = tk.Button(panel, text=("Fullscreen: ON" if getattr(self.controller, "is_fullscreen", False) else "Fullscreen: OFF"), command=_toggle_fullscreen)
-        self._fs_btn.place(x=5, y=5, anchor="nw")
-
-        # Admin rows area (where each fruit/add-on row will be shown)
-        rows_frame = tk.Frame(panel, bg="#222")
-        rows_frame.place(relx=0.5, rely=0.12, anchor="n", relwidth=0.96, relheight=0.78)
-
-        # store the parent so _refresh_admin_rows can populate into it
-        self.admin_rows_parent = rows_frame
-
-        # Try to populate rows using your existing helper (keeps single source of truth)
-        if hasattr(self, "_refresh_admin_rows"):
-            try:
-                self._refresh_admin_rows()
-            except Exception as e:
-                self.controller.log(f"Welcome: _refresh_admin_rows() error: {e}")
-                # fallback display if the helper exists but fails
-                for w in rows_frame.winfo_children():
-                    w.destroy()
-                tk.Label(rows_frame, text="(admin refresh failed)", bg="#222", fg="white").pack()
-        else:
-            # No helper found: create a minimal interactive fallback
-            for w in rows_frame.winfo_children():
-                w.destroy()
-
-            def make_row(parent, row_idx, label_text, stock_val_getter, change_fn):
-                r = tk.Frame(parent, bg="#222")
-                r.grid_rowconfigure(0, weight=1)
-                r.grid_columnconfigure(0, weight=1)
-                r.grid(row=row_idx, column=0, sticky="ew", pady=2)
-
-                lbl = tk.Label(r, text=label_text, bg="#222", fg="white", anchor="w")
-                lbl.pack(side="left", padx=6)
-
-                stock_var = tk.StringVar(value=str(stock_val_getter()))
-                stock_label = tk.Label(r, textvariable=stock_var, bg="#222", fg="white", width=6)
-                stock_label.pack(side="left", padx=6)
-
-                def on_change(delta):
-                    try:
-                        change_fn(delta)
-                        stock_var.set(str(stock_val_getter()))
-                    except Exception as e:
-                        self.controller.log(f"Admin change error: {e}")
-
-                minus = tk.Button(r, text="-", command=lambda: on_change(-1))
-                minus.pack(side="left")
-                plus = tk.Button(r, text="+", command=lambda: on_change(1))
-                plus.pack(side="left")
-
-            # populate fruits
-            row = 0
-            catalog = getattr(self.controller, "catalog", {})
-            for k, info in catalog.items():
-                name = info.get("name", k)
-                make_row(rows_frame, row, f"{name} (fruit)", lambda info=info: int(info.get("stock", 0)),
-                         lambda d, info=info: info.__setitem__("stock", max(0, int(info.get("stock", 0)) + d)))
-                row += 1
-
-            # populate addons
-            addons = getattr(self.controller, "addons", {})
-            for k, info in addons.items():
-                name = info.get("name", k)
-                make_row(rows_frame, row, f"{name} (add-on)", lambda info=info: int(info.get("stock", 0)),
-                         lambda d, info=info: info.__setitem__("stock", max(0, int(info.get("stock", 0)) + d)))
-                row += 1
-
-    def on_admin_zone_click(self, event):
-        # toggle admin panel and STOP further event propagation so the canvas-wide handler won't run
-        self.toggle_admin()
-        return "break"
-
-    def _refresh_admin_rows(self):
-        """Recreate the admin rows listing each fruit, its stock, sales, add-ons, ingredients, and controls."""
-        parent = self.admin_rows_parent
-        # clear children
-        for w in parent.winfo_children():
-            w.destroy()
-
-        # heading row
-        hdr = tk.Frame(parent, bg="#222")
-        hdr.pack(fill="x", pady=(2,6))
-        tk.Label(hdr, text="Item", width=20, anchor="w", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(hdr, text="Stock", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(hdr, text="Sales", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(hdr, text="Best", width=6, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(hdr, text="Controls", width=28, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
-
-        # rows for each fruit
-        for key, meta in self.controller.catalog.items():
-            row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=2)
-
-            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
-
-            stock_lbl = tk.Label(row, text=str(meta.get("stock", meta.get("in_stock", ""))), width=8, anchor="center", bg="#222", fg="white")
-            stock_lbl.pack(side="left", padx=4)
-
-            sales_lbl = tk.Label(row, text=str(meta.get("sales", 0)), width=8, anchor="center", bg="#222", fg="white")
-            sales_lbl.pack(side="left", padx=4)
-
-            best_lbl = tk.Label(row, text="✓" if meta.get("best_seller", False) else "", width=6, anchor="center", bg="#222", fg="#0f0")
-            best_lbl.pack(side="left", padx=4)
-
-            # controls
-            controls = tk.Frame(row, bg="#222")
-            controls.pack(side="left", padx=4)
-
-            def make_inc_stock(k):
-                return lambda: self._admin_change_stock(k, +1)
-            def make_dec_stock(k):
-                return lambda: self._admin_change_stock(k, -1)
-            def make_inc_sales(k):
-                return lambda: self._admin_change_sales(k, +1)
-            def make_dec_sales(k):
-                return lambda: self._admin_change_sales(k, -1)
-
-            btn_dec_stock = tk.Button(controls, text="-Stock", command=make_dec_stock(key), width=8)
-            btn_dec_stock.pack(side="left", padx=2)
-            btn_inc_stock = tk.Button(controls, text="+Stock", command=make_inc_stock(key), width=8)
-            btn_inc_stock.pack(side="left", padx=2)
-            btn_dec_sales = tk.Button(controls, text="-Sales", command=make_dec_sales(key), width=8)
-            btn_dec_sales.pack(side="left", padx=6)
-            btn_inc_sales = tk.Button(controls, text="+Sales", command=make_inc_sales(key), width=8)
-            btn_inc_sales.pack(side="left", padx=2)
-
-        # Separator for addons
-        sep = tk.Label(parent, text="Add-Ons", bg="#222", fg="#fff", anchor="w")
-        sep.pack(fill="x", pady=(8,4), padx=6)
-
-        for key, meta in self.controller.addons.items():
-            row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=2)
-            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
-            stock_lbl = tk.Label(row, text=str(meta.get("stock", 0)), width=8, anchor="center", bg="#222", fg="white")
-            stock_lbl.pack(side="left", padx=4)
-            sales_lbl = tk.Label(row, text=str(meta.get("sales", 0)), width=8, anchor="center", bg="#222", fg="white")
-            sales_lbl.pack(side="left", padx=4)
-            controls = tk.Frame(row, bg="#222"); controls.pack(side="left", padx=4)
-            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_addon_stock(k, -1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_addon_stock(k, +1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="-Sales", command=lambda k=key: self._admin_change_addon_sales(k, -1), width=8).pack(side="left", padx=6)
-            tk.Button(controls, text="+Sales", command=lambda k=key: self._admin_change_addon_sales(k, +1), width=8).pack(side="left", padx=2)
-
-        # Separator for ingredients (stock only)
-        sep2 = tk.Label(parent, text="Ingredients (stock only)", bg="#222", fg="#fff", anchor="w")
-        sep2.pack(fill="x", pady=(8,4), padx=6)
-
-        for key, meta in self.controller.ingredients.items():
-            row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=2)
-            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
-            stock_lbl = tk.Label(row, text=str(meta.get("stock", 0)), width=8, anchor="center", bg="#222", fg="white")
-            stock_lbl.pack(side="left", padx=4)
-            controls = tk.Frame(row, bg="#222"); controls.pack(side="left", padx=4)
-            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, -1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, +1), width=8).pack(side="left", padx=2)
-
-        # Income display and reset
-        income_row = tk.Frame(parent, bg="#222")
-        income_row.pack(fill="x", pady=(8,2))
-        tk.Label(income_row, text="Total Income:", width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
-        tk.Label(income_row, text=f"{self.controller.total_income:.2f}", width=12, anchor="w", bg="#222", fg="#FFD700").pack(side="left", padx=4)
-        tk.Button(income_row, text="Reset Income", command=lambda: self._admin_reset_income(), width=12).pack(side="left", padx=6)
-
-    def _admin_change_stock(self, key, delta):
-        """Change stock safely and refresh UI; delta may be positive or negative."""
-        item = self.controller.catalog.get(key)
-        if not item:
-            return
-        new_stock = max(0, item.get("stock", 0) + delta)
-        item["stock"] = new_stock
-        self.controller.log(f"Admin changed stock for {key}: {delta} -> new stock {new_stock}")
-        # refresh overlays and admin rows and any summaries
-        self.controller.update_best_sellers()
-        fs = self.controller.frames.get(FruitSelectionScreen)
-        if fs:
-            try:
-                fs.update_overlays()
-                fs.render_summary()
-            except Exception:
-                pass
-        self._refresh_admin_rows()
-
-    def _admin_change_sales(self, key, delta):
-        item = self.controller.catalog.get(key)
-        if not item:
-            return
-        new_sales = max(0, item.get("sales", 0) + delta)
-        item["sales"] = new_sales
-        self.controller.log(f"Admin changed sales for {key}: {delta} -> new sales {new_sales}")
-        try:
-            self.update_best_sellers()
-        except Exception:
-            pass
-        self._refresh_admin_rows()
-
-    def _admin_change_addon_stock(self, key, delta):
-        item = self.controller.addons.get(key)
-        if not item:
-            return
-        item["stock"] = max(0, item.get("stock", 0) + delta)
-        self.controller.log(f"Admin changed addon stock for {key}: {delta} -> {item['stock']}")
-        self._refresh_admin_rows()
-
-    def _admin_change_addon_sales(self, key, delta):
-        item = self.controller.addons.get(key)
-        if not item:
-            return
-        item["sales"] = max(0, item.get("sales", 0) + delta)
-        self.controller.log(f"Admin changed addon sales for {key}: {delta} -> {item['sales']}")
-        self._refresh_admin_rows()
-
-    def _admin_change_ingredient_stock(self, key, delta):
-        item = self.controller.ingredients.get(key)
-        if not item:
-            return
-        item["stock"] = max(0, item.get("stock", 0) + delta)
-        self.controller.log(f"Admin changed ingredient stock for {key}: {delta} -> {item['stock']}")
-        self._refresh_admin_rows()
-
-    def _admin_reset_income(self):
-        self.controller.total_income = 0.0
-        self.controller.log("Admin reset total income")
-        self._refresh_admin_rows()
-
-    def _admin_change_sales(self, key, delta):
-        """Change sales safely and refresh UI; delta may be positive or negative but sales clamped to >= 0."""
-        item = self.controller.catalog.get(key)
-        if not item:
-            return
-        new_sales = max(0, item.get("sales", 0) + delta)
-        item["sales"] = new_sales
-        self.controller.log(f"Admin changed sales for {key}: {delta} -> new sales {new_sales}")
-        # recompute best sellers and refresh overlays + admin rows
-        self.controller.update_best_sellers()
-        fs = self.controller.frames.get(FruitSelectionScreen)
-        if fs:
-            try:
-                fs.update_overlays()
-                fs.render_summary()
-            except Exception:
-                pass
-        self._refresh_admin_rows()
-
-    def toggle_admin(self):
-        """Toggle admin panel visibility."""
-        if self.admin_panel_visible:
-            # hide
-            self.admin_panel.place_forget()
-            self.admin_panel_visible = False
-            self.controller.log("Admin panel hidden")
-        else:
-            # refresh contents before showing
-            self.controller.update_best_sellers()
-            self._refresh_admin_rows()
-            self.admin_panel.place(relx=0.5, rely=0.5, anchor="center")
-            self.admin_panel_visible = True
-            self.controller.log("Admin panel shown")
+        self.canvas.tag_bind(self.admin_zone, "<Button-1>", lambda e: self.admin_panel.toggle())
 
     def on_screen_click(self, event):
         # ignore taps while admin panel is visible but still show touch feedback cuz why not
-        if getattr(self, "admin_panel_visible", False):
+        if self.admin_panel.visible:
             self.controller.log("Screen tapped but admin panel visible — ignoring")
             return "break"
         else:
@@ -1105,9 +1140,9 @@ class WelcomeScreen(tk.Frame):
     def tkraise(self, *args, **kwargs):
         super().tkraise(*args, **kwargs)
         # hide admin when welcome shown by default
-        if self.admin_panel_visible:
+        if self.admin_panel.visible:
             self.admin_panel.place_forget()
-            self.admin_panel_visible = False
+            self.admin_panel.visible = False
 
         # Pause inactivity while on the welcome screen so admin won't be closed by the timer.
         # show_frame(...) will set/resume normal inactivity when another frame is shown.
@@ -1883,7 +1918,7 @@ class CashMethodScreen(tk.Frame):
             self.controller.payment_method = "Cash"
             self.controller.record_sale()
             self.cancel_auto_proceed()
-            self._auto_proceed_job = self.after(1000, lambda: self.controller.show_frame(ProcessingScreen, pause=True))
+            self._auto_proceed_job = self.after(1000, lambda: self.controller.show_frame(ProcessingScreen, pause=True, skip_error_check=True))
 
     def reset_payment(self):
         """Reset the entered amount (used by admin 'Reset' button)."""
@@ -1963,7 +1998,7 @@ class PaypalMethodScreen(tk.Frame):
         # record sale
         self.controller.payment_method = "PayPal"
         self.controller.record_sale()
-        self.controller.show_frame(ProcessingScreen, pause=True)
+        self.controller.show_frame(ProcessingScreen, pause=True, skip_error_check=True)
 
     def render_summary(self):
         parts = []
@@ -2363,7 +2398,7 @@ class ProcessingScreen(tk.Frame):
             self.controller.resume_inactivity()
         except Exception:
             pass
-        self.controller.show_frame(OrderCompleteScreen, timeout_ms=self.controller.default_timeout_ms * 2)
+        self.controller.show_frame(OrderCompleteScreen, timeout_ms=self.controller.default_timeout_ms * 2, skip_error_check=True)
 
 class OrderCompleteScreen(tk.Frame):
     def __init__(self, parent, controller):
@@ -2405,242 +2440,18 @@ class ErrorScreen(tk.Frame):
         self.admin_panel = tk.Frame(self, width=750, height=575, bg="#222", bd=4, relief="raised")
         self.admin_panel.place(relx=0.5, rely=0.5, anchor="center")
         self.admin_panel.place_forget()
-        self.admin_panel_visible = False
+        self.admin_panel.visible = False
 
-        # Build admin UI inside panel (consistent with WelcomeScreen style)
-        self._build_admin_ui()
-
-    # -------------------------
-    # Admin UI builder (same pattern as WelcomeScreen)
-    # -------------------------
-    def _build_admin_ui(self):
-        panel = self.admin_panel
-        # Clear any previous widgets (safe to call multiple times)
-        for w in panel.winfo_children():
-            try:
-                w.destroy()
-            except Exception:
-                pass
-        # Title
-        title = tk.Label(panel, text="ADMIN PANEL", font=("Arial", 15, "bold"), bg="#222", fg="white")
-        title.place(relx=0.5, y=-2, anchor="n")
-        # Close button (hide admin)
-        close_btn = tk.Button(panel, text="Close", command=self.toggle_admin)
-        close_btn.place(x=panel.winfo_reqwidth() - 10, y=0, anchor="ne")
-        # Exit button (closes app)
-        exit_btn = tk.Button(panel, text="Exit", command=lambda: self.controller.destroy())
-        exit_btn.place(x=panel.winfo_reqwidth() - 10, y=panel.winfo_reqheight() - 10, anchor="se")
-        # Fullscreen toggle
-        def _toggle_fullscreen():
-            try:
-                new_state = not getattr(self.controller, "is_fullscreen", True)
-                try:
-                    self.controller.attributes("-fullscreen", new_state)
-                except Exception:
-                    try:
-                        self.controller.attributes("-zoomed", new_state)
-                    except Exception:
-                        pass
-                self.controller.is_fullscreen = new_state
-                self._fs_btn.config(text="Fullscreen: OFF" if new_state else "Fullscreen: ON")
-            except Exception as e:
-                self.controller.log(f"Failed to toggle fullscreen: {e}")
-        self._fs_btn = tk.Button(panel, text=("Fullscreen: ON" if getattr(self.controller, "is_fullscreen", False) else "Fullscreen: OFF"), command=_toggle_fullscreen)
-        self._fs_btn.place(x=0, y=0, anchor="nw")
-        # Stock Recheck button
-        self.recheck_btn = tk.Button(
-            self.admin_panel,
-            text="Recheck Stock",
-            command=self.recheck_stock
-            )
-        self.recheck_btn.place(x=0, y=panel.winfo_reqheight() - 10, anchor="sw")
-
-        # Admin rows area (where each fruit/add-on row will be shown)
-        rows_frame = tk.Frame(panel, bg="#222")
-        rows_frame.place(relx=0.5, rely=0.06, anchor="n", relwidth=0.98, relheight=0.88)
-
-        self.admin_rows_parent = rows_frame
-        self._refresh_admin_rows()
-
-    def _refresh_admin_rows(self):
-        """Recreate the admin rows listing each fruit, its stock, sales, add-ons, ingredients, and controls."""
-        parent = self.admin_rows_parent
-        # clear children
-        for w in parent.winfo_children():
-            w.destroy()
-
-        # heading row
-        hdr = tk.Frame(parent, bg="#222")
-        hdr.pack(fill="x", pady=1)
-        tk.Label(hdr, text="Fruits", width=20, anchor="w", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(hdr, text="Stock", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(hdr, text="Sales", width=8, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(hdr, text="Best", width=6, anchor="center", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(hdr, text="Controls", width=41, anchor="center", bg="#333", fg="white").pack(fill="x", padx=4)
-
-        # rows for each fruit
-        for key, meta in self.controller.catalog.items():
-            row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=2)
-
-            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
-
-            stock_lbl = tk.Label(row, text=str(meta.get("stock", meta.get("in_stock", ""))), width=8, anchor="center", bg="#222", fg="white")
-            stock_lbl.pack(side="left", padx=4)
-
-            sales_lbl = tk.Label(row, text=str(meta.get("sales", 0)), width=8, anchor="center", bg="#222", fg="white")
-            sales_lbl.pack(side="left", padx=4)
-
-            best_lbl = tk.Label(row, text="✓" if meta.get("best_seller", False) else "", width=6, anchor="center", bg="#222", fg="#0f0")
-            best_lbl.pack(side="left", padx=4)
-
-            # controls
-            controls = tk.Frame(row, bg="#222")
-            controls.pack(side="left", padx=4)
-
-            def make_inc_stock(k):
-                return lambda: self._admin_change_stock(k, +1)
-            def make_dec_stock(k):
-                return lambda: self._admin_change_stock(k, -1)
-            def make_inc_sales(k):
-                return lambda: self._admin_change_sales(k, +1)
-            def make_dec_sales(k):
-                return lambda: self._admin_change_sales(k, -1)
-
-            btn_dec_stock = tk.Button(controls, text="-Stock", command=make_dec_stock(key), width=8)
-            btn_dec_stock.pack(side="left", padx=1)
-            btn_inc_stock = tk.Button(controls, text="+Stock", command=make_inc_stock(key), width=8)
-            btn_inc_stock.pack(side="left", padx=1)
-            btn_dec_sales = tk.Button(controls, text="-Sales", command=make_dec_sales(key), width=8)
-            btn_dec_sales.pack(side="left", padx=1)
-            btn_inc_sales = tk.Button(controls, text="+Sales", command=make_inc_sales(key), width=8)
-            btn_inc_sales.pack(side="left", padx=1)
-
-        # Separator for addons
-        sep = tk.Label(parent, text="Add-Ons", bg="#333", fg="#fff", anchor="w")
-        sep.pack(fill="x", pady=1, padx=6)
-
-        for key, meta in self.controller.addons.items():
-            row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=2)
-            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
-            stock_lbl = tk.Label(row, text=str(meta.get("stock", 0)), width=8, anchor="center", bg="#222", fg="white")
-            stock_lbl.pack(side="left", padx=4)
-            sales_lbl = tk.Label(row, text=str(meta.get("sales", 0)), width=8, anchor="center", bg="#222", fg="white")
-            sales_lbl.pack(side="left", padx=4)
-            controls = tk.Frame(row, bg="#222"); controls.pack(side="left", padx=4)
-            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_addon_stock(k, -1), width=8).pack(side="left", padx=1)
-            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_addon_stock(k, +1), width=8).pack(side="left", padx=1)
-            tk.Button(controls, text="-Sales", command=lambda k=key: self._admin_change_addon_sales(k, -1), width=8).pack(side="left", padx=1)
-            tk.Button(controls, text="+Sales", command=lambda k=key: self._admin_change_addon_sales(k, +1), width=8).pack(side="left", padx=1)
-
-        # Separator for ingredients (stock only)
-        sep2 = tk.Label(parent, text="Base Ingredients", bg="#333", fg="#fff", anchor="w")
-        sep2.pack(fill="x", pady=1, padx=6)
-
-        for key, meta in self.controller.ingredients.items():
-            row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=1)
-            tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
-            stock_lbl = tk.Label(row, text=str(meta.get("stock", 0)), width=8, anchor="center", bg="#222", fg="white")
-            stock_lbl.pack(side="left", padx=4)
-            controls = tk.Frame(row, bg="#222"); controls.pack(side="left", padx=4)
-            tk.Button(controls, text="-Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, -1), width=8).pack(side="left", padx=1)
-            tk.Button(controls, text="+Stock", command=lambda k=key: self._admin_change_ingredient_stock(k, +1), width=8).pack(side="left", padx=1)
-
-        # Income display and reset
-        income_row = tk.Frame(parent, bg="#333")
-        income_row.pack(fill="x", pady=1)
-        tk.Label(income_row, text="Total Income:", anchor="w", bg="#333", fg="white").pack(side="left", padx=4)
-        tk.Label(income_row, text=f"{self.controller.total_income:.2f}", width=30, anchor="center", bg="#222", fg="#FFC800").pack(side="left", padx=10)
-        tk.Button(income_row, text="Reset Income", command=lambda: self._admin_reset_income(), width=12).pack(side="left", padx=10)
-
-    def recheck_stock(self):
-        if not self.controller.check_error_state():
-            self.admin_panel.place_forget()
-            self.admin_panel_visible = False
-            self.controller.log("Error admin panel hidden")
-            self.controller.show_frame(WelcomeScreen, pause=True)
-
-    def _admin_change_stock(self, key, delta):
-        """Change stock safely and refresh UI; delta may be positive or negative."""
-        item = self.controller.catalog.get(key)
-        if not item:
-            return
-        new_stock = max(0, item.get("stock", 0) + delta)
-        item["stock"] = new_stock
-        self.controller.log(f"Admin changed stock for {key}: {delta} -> new stock {new_stock}")
-        # refresh overlays and admin rows and any summaries
-        self.controller.update_best_sellers()
-        fs = self.controller.frames.get(FruitSelectionScreen)
-        if fs:
-            try:
-                fs.update_overlays()
-                fs.render_summary()
-            except Exception:
-                pass
-        self._refresh_admin_rows()
-
-    def _admin_change_sales(self, key, delta):
-        item = self.controller.catalog.get(key)
-        if not item:
-            return
-        new_sales = max(0, item.get("sales", 0) + delta)
-        item["sales"] = new_sales
-        self.controller.log(f"Admin changed sales for {key}: {delta} -> new sales {new_sales}")
-        try:
-            self.update_best_sellers()
-        except Exception:
-            pass
-        self._refresh_admin_rows()
-
-    def _admin_change_addon_stock(self, key, delta):
-        item = self.controller.addons.get(key)
-        if not item:
-            return
-        item["stock"] = max(0, item.get("stock", 0) + delta)
-        self.controller.log(f"Admin changed addon stock for {key}: {delta} -> {item['stock']}")
-        self._refresh_admin_rows()
-
-    def _admin_change_addon_sales(self, key, delta):
-        item = self.controller.addons.get(key)
-        if not item:
-            return
-        item["sales"] = max(0, item.get("sales", 0) + delta)
-        self.controller.log(f"Admin changed addon sales for {key}: {delta} -> {item['sales']}")
-        self._refresh_admin_rows()
-
-    def _admin_change_ingredient_stock(self, key, delta):
-        item = self.controller.ingredients.get(key)
-        if not item:
-            return
-        item["stock"] = max(0, item.get("stock", 0) + delta)
-        self.controller.log(f"Admin changed ingredient stock for {key}: {delta} -> {item['stock']}")
-        self._refresh_admin_rows()
-
-    def _admin_reset_income(self):
-        self.controller.total_income = 0.0
-        self.controller.log("Admin reset total income")
-        self._refresh_admin_rows()
-
-    def _admin_change_sales(self, key, delta):
-        """Change sales safely and refresh UI; delta may be positive or negative but sales clamped to >= 0."""
-        item = self.controller.catalog.get(key)
-        if not item:
-            return
-        new_sales = max(0, item.get("sales", 0) + delta)
-        item["sales"] = new_sales
-        self.controller.log(f"Admin changed sales for {key}: {delta} -> new sales {new_sales}")
-        # recompute best sellers and refresh overlays + admin rows
-        self.controller.update_best_sellers()
-        fs = self.controller.frames.get(FruitSelectionScreen)
-        if fs:
-            try:
-                fs.update_overlays()
-                fs.render_summary()
-            except Exception:
-                pass
-        self._refresh_admin_rows()
+        self.admin_panel = AdminPanel(
+            self,
+            self.controller,
+            width=750,
+            height=575,
+            show_recheck_stock=True,
+            return_to_cls=WelcomeScreen,
+        )
+        self.admin_panel.place(relx=0.5, rely=0.5, anchor="center")
+        self.admin_panel.hide()
 
     # -------------------------
     # Admin zone tap / toggle
@@ -2661,7 +2472,7 @@ class ErrorScreen(tk.Frame):
         if self._admin_tap_count >= 3:
             self._admin_tap_count = 0
             self._admin_tap_reset_job = None
-            self.toggle_admin()
+            self.admin_panel.toggle()
             return "break"
 
         # schedule reset
@@ -2672,32 +2483,6 @@ class ErrorScreen(tk.Frame):
         self._admin_tap_count = 0
         self._admin_tap_reset_job = None
         self.controller.log("Error admin tap count reset")
-
-    def toggle_admin(self):
-        """Show / hide the admin panel overlay."""
-        if getattr(self, "admin_panel_visible", False):
-            self.admin_panel.place_forget()
-            self.admin_panel_visible = False
-            self.controller.log("Error admin panel hidden")
-            # resume inactivity timer when admin is hidden (if desired)
-            try:
-                self.controller.resume_inactivity()
-            except Exception:
-                pass
-        else:
-            # show and pause inactivity timer so admin can use controls safely
-            self.admin_panel.place(relx=0.5, rely=0.5, anchor="center")
-            self.admin_panel_visible = True
-            self.controller.log("Error admin panel shown")
-            try:
-                self.controller.pause_inactivity()
-            except Exception:
-                pass
-            # refresh rows (in case stock changed while panel hidden)
-            try:
-                self._refresh_admin_rows()
-            except Exception:
-                pass
 
 # -------------------------
 # Run
