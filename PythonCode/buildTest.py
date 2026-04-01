@@ -15,10 +15,15 @@ faulthandler.enable()
 # Supabase
 from dotenv import load_dotenv
 from supabase import create_client
+from supabase.client import ClientOptions
 load_dotenv()
 url = os.environ["SUPABASE_URL"]
 key = os.environ["SUPABASE_KEY"]
-supabase = create_client(url, key)
+supabase = create_client(url, key, options=ClientOptions(
+        postgrest_client_timeout=20,
+        storage_client_timeout=20,
+        schema="public",
+    ),)
 
 # -------------------------
 # Config / paths
@@ -924,10 +929,15 @@ class App(tk.Tk):
             f["best_seller"] = (f.get("sales", 0) == max_sales and max_sales > 0)
         self.log(f"Best-seller updated (max sales={max_sales})")
 
+        for key, fruit in self.catalog.items():
+            self.supabase.table("fruits").update({
+                "best_seller": fruit["best_seller"]
+            }).eq("id", fruit["id"]).execute()
+
     def record_sale(self):
         self.log(f"Recording sale for: {self.selected_fruits}")
         self.log(f"Recording sale for add-ons: {list(self.selected_addons)}")
-        
+
         # Fruits
         for k in self.selected_fruits:
             item = self.catalog.get(k)
