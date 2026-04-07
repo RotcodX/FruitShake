@@ -6,12 +6,12 @@ import os
 import tkinter.font as tkfont
 
 from decimal import Decimal, ROUND_HALF_UP
-from turtle import done
 from PIL import Image, ImageTk
 from admin import AdminPanel
 from ui_common import ASSETS_DIR, OutlinedText, SCREEN_W, SCREEN_H
 from ui_common import (
     FONT_INTER,
+    ASSETS_DIR,
     load_image_tk,
     file_exists,
     safe_delete,
@@ -148,11 +148,76 @@ class FruitSelectionScreen(tk.Frame):
         self.next_zone = (880, 520, 1020, 580)
         back_rect = self.canvas.create_rectangle(*self.back_zone, outline="")
         next_rect = self.canvas.create_rectangle(*self.next_zone, outline="")
-        self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: controller.log("Back pressed on FruitSelection") or controller.show_frame(WelcomeScreen))
+        self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: controller.log("Back pressed on FruitSelection") or controller.show_frame(WelcomeScreen, pause=True))
         self.canvas.tag_bind(next_rect, "<Button-1>", lambda e: controller.log("Next pressed on FruitSelection") or self.on_next())
 
         # summary bar (use reusable SummaryBar, centered)
         self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
+        # -----------------------
+        # Error feedback overlay
+        # -----------------------
+        self.error_feedback_active = False
+        self.error_feedback_job = None
+
+        # timing (easy to tweak)
+        self.error_flash_total_ms = 800
+        self.error_flash_fade_in_ms = 150
+        self.error_flash_hold_ms = 350
+        self.error_flash_fade_out_ms = 250
+        self.error_flash_step_ms = 50
+
+        self.error_block_tag = "fruit_error_block"
+        self.error_visual_tag = "fruit_error_visual"
+
+        self.error_block_rect = self.canvas.create_rectangle(
+            0, 0, SCREEN_W, SCREEN_H,
+            outline="",
+            fill="",
+            tags=(self.error_block_tag,)
+        )
+        self.canvas.itemconfigure(self.error_block_rect, state="hidden")
+        self.canvas.tag_bind(self.error_block_rect, "<Button-1>", lambda e: "break")
+
+        self.error_flash_frames = []
+        self.error_flash_item = None
+
+        if file_exists("errorFlash.png"):
+            try:
+                base = Image.open(
+                    os.path.join(ASSETS_DIR, "errorFlash.png")
+                ).convert("RGBA")
+
+                # Precompute a small set of alpha levels once to avoid runtime lag
+                alpha_levels = [0, 64, 128, 192, 255]
+                for alpha in alpha_levels:
+                    img = base.copy()
+                    r, g, b, a = img.split()
+                    a = a.point(lambda px, aa=alpha: (px * aa) // 255)
+                    img = Image.merge("RGBA", (r, g, b, a))
+                    self.error_flash_frames.append(ImageTk.PhotoImage(img))
+
+            except Exception as e:
+                self.controller.log(f"Failed to preload errorFlash.png frames: {e}")
+                self.error_flash_frames = []
+
+        self.error_text = OutlinedText(
+            self.canvas,
+            SCREEN_W // 2,
+            520,   # slightly above SummaryBar at y=560
+            text="",
+            font=("Inter", 18),
+            fill="#FF0000",
+            stroke=2,
+            stroke_fill="#000000",
+            mode="pillow",
+            anchor="center",
+            tag=self.error_visual_tag,
+            pillow_font_path=FONT_INTER
+        )
+        try:
+            self.canvas.itemconfigure(self.error_text._ids[0], state="hidden")
+        except Exception:
+            pass
 
         # overlay images (stock/bestseller) - keep references so PhotoImage doesn't GC
         self.overlay_refs = {}        # key -> list of PhotoImage refs
@@ -203,10 +268,127 @@ class FruitSelectionScreen(tk.Frame):
 
     def tkraise(self, *args, **kwargs):
         super().tkraise(*args, **kwargs)
+        self._hide_error_feedback()
         # update overlays & selection visuals every time screen is shown
         self.update_fruit_states()
         self.update_overlays()
         self.render_summary()
+
+    def _set_error_text_visible(self, visible):
+        try:
+            if self.error_text._ids:
+                state = "normal" if visible else "hidden"
+                self.canvas.itemconfigure(self.error_text._ids[0], state=state)
+        except Exception:
+            pass
+
+    def _set_error_flash_alpha(self, alpha):
+        if not self.error_flash_frames:
+            return
+
+        try:
+            alpha = max(0, min(255, int(alpha)))
+
+            # Map alpha to one of the precomputed frames
+            if alpha <= 0:
+                frame = self.error_flash_frames[0]
+            elif alpha < 96:
+                frame = self.error_flash_frames[1]
+            elif alpha < 160:
+                frame = self.error_flash_frames[2]
+            elif alpha < 224:
+                frame = self.error_flash_frames[3]
+            else:
+                frame = self.error_flash_frames[4]
+
+            if self.error_flash_item is None:
+                self.error_flash_item = self.canvas.create_image(
+                    0, 0,
+                    anchor="nw",
+                    image=frame,
+                    tags=(self.error_visual_tag,)
+                )
+            else:
+                self.canvas.itemconfigure(self.error_flash_item, image=frame, state="normal")
+
+            self.canvas.tag_raise(self.error_visual_tag)
+            self.canvas.tag_raise(self.error_block_tag)
+        except Exception as e:
+            self.controller.log(f"Error flash alpha update failed: {e}")
+
+    def _hide_error_feedback(self):
+        self.error_feedback_active = False
+
+        try:
+            self.canvas.itemconfigure(self.error_block_rect, state="hidden")
+        except Exception:
+            pass
+
+        try:
+            if self.error_flash_item is not None:
+                self.canvas.itemconfigure(self.error_flash_item, state="hidden")
+        except Exception:
+            pass
+
+        self._set_error_text_visible(False)
+
+        if self.error_feedback_job:
+            try:
+                self.after_cancel(self.error_feedback_job)
+            except Exception:
+                pass
+            self.error_feedback_job = None
+
+    def show_error_feedback(self, message):
+        if self.error_feedback_active:
+            return
+
+        self.error_feedback_active = True
+
+        try:
+            self.canvas.itemconfigure(self.error_block_rect, state="normal")
+            self.canvas.tag_raise(self.error_block_tag)
+        except Exception:
+            pass
+
+        try:
+            self.error_text.update(text=message)
+        except Exception:
+            pass
+        self._set_error_text_visible(True)
+
+        fade_in_steps = max(1, self.error_flash_fade_in_ms // self.error_flash_step_ms)
+        fade_out_steps = max(1, self.error_flash_fade_out_ms // self.error_flash_step_ms)
+
+        def finish():
+            self._hide_error_feedback()
+
+        def start_fade_out():
+            def fade_out_step(i=0):
+                if i >= fade_out_steps:
+                    finish()
+                    return
+
+                alpha = int(255 * (1 - ((i + 1) / fade_out_steps)))
+                self._set_error_flash_alpha(alpha)
+                self.error_feedback_job = self.after(self.error_flash_step_ms, lambda: fade_out_step(i + 1))
+
+            fade_out_step(0)
+
+        def hold():
+            self._set_error_flash_alpha(255)
+            self.error_feedback_job = self.after(self.error_flash_hold_ms, start_fade_out)
+
+        def fade_in_step(i=0):
+            if i >= fade_in_steps:
+                hold()
+                return
+
+            alpha = int(255 * ((i + 1) / fade_in_steps))
+            self._set_error_flash_alpha(alpha)
+            self.error_feedback_job = self.after(self.error_flash_step_ms, lambda: fade_in_step(i + 1))
+
+        fade_in_step(0)
 
     def on_fruit_click(self, key):
         self.controller.log(f"Clicked fruit zone: {key}")
@@ -226,6 +408,7 @@ class FruitSelectionScreen(tk.Frame):
         else:
             if len(self.controller.selected_fruits) >= self.controller.max_fruits:
                 self.controller.log("Max fruits already selected; ignoring additional selection")
+                self.show_error_feedback("Can only select a maximum of 3 fruits.")
                 return
             self.controller.selected_fruits.append(key)
             self.controller.log(f"Selected {fruit['name']}")
@@ -361,6 +544,7 @@ class FruitSelectionScreen(tk.Frame):
     def on_next(self):
         if len(self.controller.selected_fruits) == 0:
             self.controller.log("Next pressed but no fruits selected -> ignored")
+            self.show_error_feedback("Cannot proceed without a fruit selected.")
             return
 
         any_addon_in_stock = any(

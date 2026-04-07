@@ -14,7 +14,14 @@ from supabase.client import ClientOptions
 from ui_common import SCREEN_W, SCREEN_H, load_gif_frames
 # from hardware import HardwareManager # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
 
-from ui_common import money_str, amount_str, TouchFeedbackManager
+from ui_common import (
+    money_str,
+    amount_str,
+    TouchFeedbackManager,
+    OutlinedText,
+    FONT_INTER,
+    file_exists,
+)
 from screens import (
     WelcomeScreen,
     FruitSelectionScreen,
@@ -72,9 +79,17 @@ class App(tk.Tk):
         self.selected_ratio = None
 
         # inactivity timer
-        self.default_timeout_ms = 10000
+        self.default_timeout_ms = 120000
+        self.timeout_warning_ms = 60000          # show warning when 1 minute remains
+        self.timeout_countdown_ms = 10000        # switch to countdown at 10 seconds remaining
+        self.timeout_warning_poll_ms = 500       # warning state refresh interval
         self.active_timeout_ms = self.default_timeout_ms
         self.timer_id = None
+        self.timeout_warning_job = None
+        self.timeout_deadline_ms = None
+        self.current_frame = None
+        self.timeout_warning_visible = False
+        self.timeout_warning_layers = {}
 
         # UI container & frames
         container = tk.Frame(self)
@@ -88,9 +103,24 @@ class App(tk.Tk):
         self.loading_item = None
         self.loading_job = None
         self.loading_frame_index = 0
+
         overlay_img = Image.new("RGBA", (SCREEN_W, SCREEN_H), (0, 0, 0, 180))
         self.loading_overlay_photo = ImageTk.PhotoImage(overlay_img)
         self.loading_overlay_item = None
+
+        # Timeout warning visuals
+        timeout_dim_img = Image.new("RGBA", (SCREEN_W, SCREEN_H), (0, 0, 0, 120))
+        self.timeout_dim_photo = ImageTk.PhotoImage(timeout_dim_img)
+
+        self.timeout_border_photo = None
+        if file_exists("timeoutBorder.png"):
+            try:
+                border = Image.open(os.path.join("assets", "timeoutBorder.png")).convert("RGBA")
+                border = border.resize((SCREEN_W, SCREEN_H), Image.LANCZOS)
+                self.timeout_border_photo = ImageTk.PhotoImage(border)
+            except Exception as e:
+                self.log(f"Failed to load timeoutBorder.png: {e}")
+                self.timeout_border_photo = None
 
         # create frames
         self.frames = {}
@@ -231,6 +261,175 @@ class App(tk.Tk):
             txt.place(x=50, y=15)
             self.debug_widget = txt
             self.debug_mode = True
+
+    # -------------------------
+    # timeout warning helpers
+    # -------------------------
+    def _ensure_timeout_warning_ui(self, frame):
+        if frame in self.timeout_warning_layers:
+            return self.timeout_warning_layers[frame]
+
+        canvas = getattr(frame, "canvas", None)
+        if canvas is None:
+            return None
+
+        dim_item = canvas.create_image(
+            0, 0,
+            anchor="nw",
+            image=self.timeout_dim_photo
+        )
+        canvas.itemconfigure(dim_item, state="hidden")
+        try:
+            canvas.itemconfigure(dim_item, state="disabled")
+        except Exception:
+            pass
+
+        border_item = None
+        if self.timeout_border_photo is not None:
+            border_item = canvas.create_image(
+                0, 0,
+                anchor="nw",
+                image=self.timeout_border_photo
+            )
+            canvas.itemconfigure(border_item, state="hidden")
+            try:
+                canvas.itemconfigure(border_item, state="disabled")
+            except Exception:
+                pass
+
+        text_obj = OutlinedText(
+            canvas,
+            SCREEN_W // 2,
+            520,   # same general area as fruit error text
+            text="",
+            font=("Inter", 18),
+            fill="#9E9E9E",
+            stroke=2,
+            stroke_fill="#000000",
+            mode="pillow",
+            anchor="center",
+            pillow_font_path=FONT_INTER
+        )
+        try:
+            if text_obj._ids:
+                canvas.itemconfigure(text_obj._ids[0], state="hidden")
+                try:
+                    canvas.itemconfigure(text_obj._ids[0], state="disabled")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        ui = {
+            "canvas": canvas,
+            "dim_item": dim_item,
+            "border_item": border_item,
+            "text_obj": text_obj,
+        }
+        self.timeout_warning_layers[frame] = ui
+        return ui
+
+    def _set_timeout_text_visible(self, ui, visible):
+        try:
+            text_obj = ui["text_obj"]
+            if text_obj and text_obj._ids:
+                ui["canvas"].itemconfigure(
+                    text_obj._ids[0],
+                    state="normal" if visible else "hidden"
+                )
+        except Exception:
+            pass
+
+    def show_timeout_warning(self, message):
+        frame = self.current_frame
+        if frame is None:
+            return
+
+        ui = self._ensure_timeout_warning_ui(frame)
+        if ui is None:
+            return
+
+        try:
+            ui["canvas"].itemconfigure(ui["dim_item"], state="normal")
+            if ui["border_item"] is not None:
+                ui["canvas"].itemconfigure(ui["border_item"], state="normal")
+
+            ui["text_obj"].update(text=message)
+            self._set_timeout_text_visible(ui, True)
+
+            ui["canvas"].tag_raise(ui["dim_item"])
+            if ui["border_item"] is not None:
+                ui["canvas"].tag_raise(ui["border_item"])
+            if ui["text_obj"]._ids:
+                ui["canvas"].tag_raise(ui["text_obj"]._ids[0])
+
+            self.timeout_warning_visible = True
+        except Exception as e:
+            self.log(f"show_timeout_warning failed: {e}")
+
+    def hide_timeout_warning(self):
+        for ui in self.timeout_warning_layers.values():
+            try:
+                ui["canvas"].itemconfigure(ui["dim_item"], state="hidden")
+            except Exception:
+                pass
+            try:
+                if ui["border_item"] is not None:
+                    ui["canvas"].itemconfigure(ui["border_item"], state="hidden")
+            except Exception:
+                pass
+            self._set_timeout_text_visible(ui, False)
+
+        self.timeout_warning_visible = False
+
+    def _cancel_timeout_warning_job(self):
+        if self.timeout_warning_job:
+            try:
+                self.after_cancel(self.timeout_warning_job)
+            except Exception:
+                pass
+            self.timeout_warning_job = None
+
+    def _schedule_timeout_warning_poll(self):
+        self._cancel_timeout_warning_job()
+
+        if not (isinstance(self.active_timeout_ms, int) and self.active_timeout_ms > 0):
+            return
+
+        self.timeout_warning_job = self.after(
+            self.timeout_warning_poll_ms,
+            self._poll_timeout_warning
+        )
+
+    def _poll_timeout_warning(self):
+        self.timeout_warning_job = None
+
+        if not (isinstance(self.active_timeout_ms, int) and self.active_timeout_ms > 0):
+            self.hide_timeout_warning()
+            return
+
+        if self.timeout_deadline_ms is None:
+            self.hide_timeout_warning()
+            return
+
+        remaining_ms = max(0, int(self.timeout_deadline_ms - (time.monotonic() * 1000)))
+
+        if remaining_ms <= 0:
+            self.hide_timeout_warning()
+            return
+
+        if remaining_ms <= self.timeout_warning_ms:
+            if remaining_ms <= self.timeout_countdown_ms:
+                seconds_left = max(1, math.ceil(remaining_ms / 1000))
+                message = f"Returning to home in {seconds_left}..."
+            else:
+                message = "Returning to home soon if no activity is detected."
+
+            self.show_timeout_warning(message)
+        else:
+            self.hide_timeout_warning()
+
+        self._schedule_timeout_warning_poll()
 
     # -------------------------
     # best-seller / stock / sales helpers
@@ -411,6 +610,8 @@ class App(tk.Tk):
             return
 
         frame = self.frames[cls]
+        self.current_frame = frame
+        self.hide_timeout_warning()
         frame.tkraise()
 
         # configure active timeout
@@ -435,8 +636,16 @@ class App(tk.Tk):
             except Exception:
                 pass
             self.timer_id = None
+
+        self._cancel_timeout_warning_job()
+        self.hide_timeout_warning()
+        self.timeout_deadline_ms = None
+
         if isinstance(self.active_timeout_ms, int) and self.active_timeout_ms > 0:
+            self.timeout_deadline_ms = (time.monotonic() * 1000) + self.active_timeout_ms
             self.timer_id = self.after(self.active_timeout_ms, self.on_timeout)
+            self._schedule_timeout_warning_poll()
+
         try:
             self.log(f"reset_timer: active_timeout_ms={self.active_timeout_ms}, timer_id={self.timer_id}")
         except Exception:
@@ -444,12 +653,17 @@ class App(tk.Tk):
 
     def pause_inactivity(self):
         self.active_timeout_ms = None
+        self.timeout_deadline_ms = None
+
         if getattr(self, "timer_id", None):
             try:
                 self.after_cancel(self.timer_id)
             except Exception:
                 pass
             self.timer_id = None
+
+        self._cancel_timeout_warning_job()
+        self.hide_timeout_warning()
 
     def resume_inactivity(self, timeout_ms=None):
         self.active_timeout_ms = timeout_ms if timeout_ms is not None else self.default_timeout_ms
@@ -458,6 +672,8 @@ class App(tk.Tk):
     def on_timeout(self):
         if self.busy:
             return
+
+        self.hide_timeout_warning()
         self.log("Inactivity timeout — returning to WelcomeScreen and clearing selections")
         self.selected_fruits.clear()
         self.selected_addons.clear()
