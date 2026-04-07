@@ -1,17 +1,15 @@
 import tkinter as tk
-from decimal import Decimal, ROUND_HALF_UP
 import time
 import math
 import uuid
 import os
 import tkinter.font as tkfont
-import os
-from PIL import Image, ImageTk
-from ui_common import ASSETS_DIR, OutlinedText, SCREEN_W, SCREEN_H
+
+from decimal import Decimal, ROUND_HALF_UP
+from turtle import done
 from PIL import Image, ImageTk
 from admin import AdminPanel
-
-from ui_common import SCREEN_W, SCREEN_H
+from ui_common import ASSETS_DIR, OutlinedText, SCREEN_W, SCREEN_H
 from ui_common import (
     FONT_INTER,
     load_image_tk,
@@ -55,7 +53,28 @@ class WelcomeScreen(tk.Frame):
         self.admin_panel.place(relx=0.5, rely=0.5, anchor="center")
         self.admin_panel.hide()
 
-        self.canvas.tag_bind(self.admin_zone, "<Button-1>", lambda e: self.admin_panel.toggle())
+        self.canvas.tag_bind(self.admin_zone, "<Button-1>", self._open_admin_with_loading)
+
+    def _open_admin_with_loading(self, event=None):
+        if self.controller.busy:
+            return "break"
+
+        if self.admin_panel.visible:
+            self.admin_panel.hide()
+            return "break"
+
+        self.controller.show_loading_gif(self.canvas)
+
+        def done(err):
+            self.controller.hide_loading_gif()
+            if err:
+                self.controller.log(f"Welcome admin open failed: {err}")
+                return
+            self.admin_panel.show(skip_refresh=True)
+            self.admin_panel.refresh()
+
+        self.controller.run_async(self.controller.update_best_sellers, on_done=done)
+        return "break"
 
     def on_screen_click(self, event):
         # ignore taps while admin panel is visible but still show touch feedback cuz why not
@@ -368,8 +387,8 @@ class AddOnScreen(tk.Frame):
 
         # addon zones and storage for rect ids (so we can keep highlights below them)
         self.addon_zones = {
-            "pearls": (170, 179, 445, 454),
-            "cheese": (588, 179, 863, 454),
+            "pearls": (177, 167, 477, 467),
+            "cheese": (529, 167, 829, 467),
         }
         self.addon_zone_items = {}   # key -> canvas rectangle id for touch zone
 
@@ -844,11 +863,28 @@ class CashMethodScreen(tk.Frame):
 
         total = self.controller.calculate_total()
         if self.entered_amount + 0.0001 >= total:
-            # record sale then auto-proceed after short delay
+            if self.controller.busy:
+                return
+
             self.controller.payment_method = "Cash"
-            self.controller.record_sale()
             self.cancel_auto_proceed()
-            self._auto_proceed_job = self.after(1000, lambda: self.controller.show_frame(ProcessingScreen, pause=True, skip_error_check=True))
+            if self.admin_visible:
+                self.admin_panel.place_forget()
+                self.admin_visible = False
+            self.controller.show_loading_gif(self.canvas)
+
+            def _on_success():
+                self.controller.hide_loading_gif()
+                self.controller.show_frame(ProcessingScreen, pause=True, skip_error_check=True)
+
+            def _on_error(err):
+                self.controller.hide_loading_gif()
+                self.controller.log(f"CashMethod: sale failed: {err}")
+
+            self.controller.start_sale_recording(
+                on_success=_on_success,
+                on_error=_on_error,
+            )
 
     def reset_payment(self):
         """Reset the entered amount (used by admin 'Reset' button)."""
@@ -875,6 +911,14 @@ class CashMethodScreen(tk.Frame):
             parts.append("Add-ons: " + ", ".join(self.controller.addons[k]["name"] for k in self.controller.selected_addons))
         summary_text = " | ".join(parts) if parts else "No items selected"
         self.summary.set_text(summary_text)
+
+    def _cash_sale_done(self, err):
+        self.controller.hide_loading_gif()
+        if err:
+            self.controller.log(f"CashMethod: sale failed: {err}")
+            return
+        self.controller.refresh_after_sale()
+        self.controller.show_frame(ProcessingScreen, pause=True, skip_error_check=True)
 
 class PaypalMethodScreen(tk.Frame):
     def __init__(self, parent, controller):
@@ -924,11 +968,25 @@ class PaypalMethodScreen(tk.Frame):
             self.controller.log(f"PaypalMethodScreen: render_summary failed at init: {e}")
 
     def confirm_paid(self):
+        if self.controller.busy:
+            return
+
         self.controller.log("I PAID pressed (Paypal) — recording sale and proceeding to Processing")
-        # record sale
         self.controller.payment_method = "PayPal"
-        self.controller.record_sale()
-        self.controller.show_frame(ProcessingScreen, pause=True, skip_error_check=True)
+        self.controller.show_loading_gif(self.canvas)
+
+        def _on_success():
+            self.controller.hide_loading_gif()
+            self.controller.show_frame(ProcessingScreen, pause=True, skip_error_check=True)
+
+        def _on_error(err):
+            self.controller.hide_loading_gif()
+            self.controller.log(f"PaypalMethod: sale failed: {err}")
+
+        self.controller.start_sale_recording(
+            on_success=_on_success,
+            on_error=_on_error,
+        )
 
     def render_summary(self):
         parts = []

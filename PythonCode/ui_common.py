@@ -2,7 +2,7 @@ import os
 import tkinter as tk
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageTk
+    from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageSequence
     _HAS_PIL = True
 except Exception:
     _HAS_PIL = False
@@ -29,10 +29,31 @@ def file_exists(name):
     return os.path.exists(os.path.join(ASSETS_DIR, name))
 
 def money_str(amount):
-    return f"₱{amount:.2f}"
+    return f"₱{amount:,.2f}"
 
 def amount_str(amount):
     return f"{amount:,.2f}"
+
+def load_gif_frames(name, resize_to=None):
+    path = os.path.join(ASSETS_DIR, name)
+    img = Image.open(path)
+
+    try:
+        resample = Image.Resampling.LANCZOS
+    except AttributeError:
+        resample = Image.LANCZOS
+
+    frames = []
+    delays = []
+
+    for frame in ImageSequence.Iterator(img):
+        fr = frame.convert("RGBA")
+        if resize_to:
+            fr = fr.resize(resize_to, resample)
+        frames.append(ImageTk.PhotoImage(fr))
+        delays.append(frame.info.get("duration", 80))
+
+    return frames, delays
 
 class OutlinedText:
     def __init__(self, canvas, x, y, text="", font=("Arial", 24), fill="#FFF",

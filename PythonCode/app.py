@@ -5,11 +5,13 @@ import math
 import uuid
 import tkinter as tk
 import queue
+import threading
 
+from PIL import Image, ImageTk
 from dotenv import load_dotenv
 from supabase import create_client
 from supabase.client import ClientOptions
-from ui_common import SCREEN_W, SCREEN_H
+from ui_common import SCREEN_W, SCREEN_H, load_gif_frames
 # from hardware import HardwareManager # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
 
 from ui_common import money_str, amount_str, TouchFeedbackManager
@@ -47,6 +49,7 @@ class App(tk.Tk):
         self.debug_mode = False
         self._debug_lines = []
         self.debug_widget = None
+        self._main_thread_ident = threading.get_ident()
         self.bind_all("<Key-d>", lambda e: self.toggle_debug())
         self.bind_all("<Key-D>", lambda e: self.toggle_debug())
 
@@ -78,6 +81,16 @@ class App(tk.Tk):
         container.pack(fill="both", expand=True)
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
+
+        self.busy = False
+        self.loading_frames, self.loading_delays = load_gif_frames("loading.gif", resize_to=(250, 250))
+        self.loading_canvas = None
+        self.loading_item = None
+        self.loading_job = None
+        self.loading_frame_index = 0
+        overlay_img = Image.new("RGBA", (SCREEN_W, SCREEN_H), (0, 0, 0, 180))
+        self.loading_overlay_photo = ImageTk.PhotoImage(overlay_img)
+        self.loading_overlay_item = None
 
         # create frames
         self.frames = {}
@@ -182,16 +195,29 @@ class App(tk.Tk):
     # -------------------------
     # logging / debug helpers
     # -------------------------
+    def _append_debug_line(self, line):
+        self._debug_lines.append(line)
+        if self.debug_widget:
+            try:
+                self.debug_widget.config(state="normal")
+                self.debug_widget.insert("end", line + "\n")
+                self.debug_widget.see("end")
+                self.debug_widget.config(state="disabled")
+            except Exception:
+                pass
+
     def log(self, msg):
         ts = time.strftime("%H:%M:%S")
         line = f"[{ts}] {msg}"
         print(line)
-        self._debug_lines.append(line)
-        if self.debug_widget:
-            self.debug_widget.config(state="normal")
-            self.debug_widget.insert("end", line + "\n")
-            self.debug_widget.see("end")
-            self.debug_widget.config(state="disabled")
+
+        if threading.get_ident() == getattr(self, "_main_thread_ident", None):
+            self._append_debug_line(line)
+        else:
+            try:
+                self.after(0, lambda l=line: self._append_debug_line(l))
+            except Exception:
+                pass
 
     def toggle_debug(self):
         if self.debug_widget:
@@ -209,14 +235,28 @@ class App(tk.Tk):
     # -------------------------
     # best-seller / stock / sales helpers
     # -------------------------
+    def _compute_best_seller_flags(self, catalog_snapshot=None):
+        catalog_snapshot = self.catalog if catalog_snapshot is None else catalog_snapshot
+        sales_values = [item.get("sales", 0) for item in catalog_snapshot.values()]
+        if not sales_values:
+            return {}, 0
+
+        max_sales = max(sales_values)
+        flags = {
+            key: (item.get("sales", 0) == max_sales and max_sales > 0)
+            for key, item in catalog_snapshot.items()
+        }
+        return flags, max_sales
+
     def update_best_sellers(self):
         """Set catalog[*]['best_seller'] True for fruit(s) with the highest sales (>0)."""
-        sales_values = [f.get("sales", 0) for f in self.catalog.values()]
-        if not sales_values:
+        flags, max_sales = self._compute_best_seller_flags()
+        if not flags:
             return
-        max_sales = max(sales_values)
-        for k, f in self.catalog.items():
-            f["best_seller"] = (f.get("sales", 0) == max_sales and max_sales > 0)
+
+        for key, is_best in flags.items():
+            self.catalog[key]["best_seller"] = is_best
+
         self.log(f"Best-seller updated (max sales={max_sales})")
 
         for key, fruit in self.catalog.items():
@@ -224,75 +264,144 @@ class App(tk.Tk):
                 "best_seller": fruit["best_seller"]
             }).eq("id", fruit["id"]).execute()
 
-    def record_sale(self):
-        self.log(f"Recording sale for: {self.selected_fruits}")
-        self.log(f"Recording sale for add-ons: {list(self.selected_addons)}")
-
-        # Fruits
-        for k in self.selected_fruits:
-            item = self.catalog.get(k)
-            if not item:
-                continue
-
-            item["stock"] = max(0, item.get("stock", 0) - 1)
-            item["sales"] = item.get("sales", 0) + 1
-
-            # SAVE TO SUPABASE
-            self.supabase.table("fruits").update({
-                "stock": item["stock"],
-                "sales": item["sales"]
-            }).eq("id", item["id"]).execute()
-        # Add-ons
-        for k in self.selected_addons:
-            item = self.addons.get(k)
-            if not item:
-                continue
-
-            item["stock"] = max(0, item.get("stock", 0) - 1)
-            item["sales"] = item.get("sales", 0) + 1
-
-            self.supabase.table("addons").update({
-                "stock": item["stock"],
-                "sales": item["sales"]
-            }).eq("id", item["id"]).execute()
-        # Ingredients
-        for k, item in self.ingredients.items():
-            item["stock"] = max(0, item.get("stock", 0) - 1)
-
-            self.supabase.table("ingredients").update({
-                "stock": item["stock"]
-            }).eq("id", item["id"]).execute()
-        # Income
-        total = self.calculate_total()
-        self.total_income += total
-        self.log("Added Income: " + money_str(total))
-
-        # update best sellers
-        self.update_best_sellers()
-
-        # refresh overlays on fruit screen (if exists)
-        fs = self.frames.get(FruitSelectionScreen)
-        if fs:
-            try:
-                fs.update_overlays()
-                fs.render_summary()
-            except Exception as e:
-                self.log(f"Failed to refresh FruitSelection overlays after sale: {e}")
-
-        sale_row = {
-        "sale_id": str(uuid.uuid4()),
-        "total_price": total,
-        "payment_method": self.payment_method or "Unknown",
-        "selected_fruits": ", ".join(self.catalog[k]["name"] for k in self.selected_fruits),
-        "selected_addons": ", ".join(self.addons[k]["name"] for k in self.selected_addons) if self.selected_addons else None,
+    def _build_sale_snapshot(self):
+        return {
+            "payment_method": self.payment_method or "Unknown",
+            "selected_fruits": list(self.selected_fruits),
+            "selected_addons": sorted(self.selected_addons),
         }
 
+    def _record_sale_worker(self, snapshot):
+        selected_fruits = snapshot["selected_fruits"]
+        selected_addons = snapshot["selected_addons"]
+        payment_method = snapshot["payment_method"]
+
+        total = self.calculate_total_for_selection(selected_fruits, selected_addons, emit_log=False)
+
+        self.log(f"Recording sale for: {selected_fruits}")
+        self.log(f"Recording sale for add-ons: {selected_addons}")
+
+        fruit_updates = {}
+        updated_catalog = {
+            key: dict(item)
+            for key, item in self.catalog.items()
+        }
+        for key in selected_fruits:
+            item = updated_catalog.get(key)
+            if not item:
+                continue
+            item["stock"] = max(0, item.get("stock", 0) - 1)
+            item["sales"] = item.get("sales", 0) + 1
+            fruit_updates[key] = {
+                "stock": item["stock"],
+                "sales": item["sales"],
+            }
+            self.supabase.table("fruits").update(fruit_updates[key]).eq("id", item["id"]).execute()
+
+        addon_updates = {}
+        updated_addons = {
+            key: dict(item)
+            for key, item in self.addons.items()
+        }
+        for key in selected_addons:
+            item = updated_addons.get(key)
+            if not item:
+                continue
+            item["stock"] = max(0, item.get("stock", 0) - 1)
+            item["sales"] = item.get("sales", 0) + 1
+            addon_updates[key] = {
+                "stock": item["stock"],
+                "sales": item["sales"],
+            }
+            self.supabase.table("addons").update(addon_updates[key]).eq("id", item["id"]).execute()
+
+        ingredient_updates = {}
+        updated_ingredients = {
+            key: dict(item)
+            for key, item in self.ingredients.items()
+        }
+        for key, item in updated_ingredients.items():
+            item["stock"] = max(0, item.get("stock", 0) - 1)
+            ingredient_updates[key] = {"stock": item["stock"]}
+            self.supabase.table("ingredients").update(ingredient_updates[key]).eq("id", item["id"]).execute()
+
+        best_seller_flags, max_sales = self._compute_best_seller_flags(updated_catalog)
+        for key, is_best in best_seller_flags.items():
+            updated_catalog[key]["best_seller"] = is_best
+            self.supabase.table("fruits").update({
+                "best_seller": is_best
+            }).eq("id", updated_catalog[key]["id"]).execute()
+
+        sale_row = {
+            "sale_id": str(uuid.uuid4()),
+            "total_price": total,
+            "payment_method": payment_method,
+            "selected_fruits": ", ".join(
+                updated_catalog[key]["name"]
+                for key in selected_fruits
+                if key in updated_catalog
+            ),
+            "selected_addons": ", ".join(
+                updated_addons[key]["name"]
+                for key in selected_addons
+                if key in updated_addons
+            ) if selected_addons else None,
+        }
         self.supabase.table("sales").insert(sale_row).execute()
+
+        self.log("Added Income: " + money_str(total))
+        self.log(f"Best-seller updated (max sales={max_sales})")
+
+        return {
+            "catalog": updated_catalog,
+            "addons": updated_addons,
+            "ingredients": updated_ingredients,
+            "total_income_delta": total,
+            "payment_method": payment_method,
+        }
+
+    def apply_sale_result(self, result):
+        self.catalog = result["catalog"]
+        self.addons = result["addons"]
+        self.ingredients = result["ingredients"]
+        self.total_income += result["total_income_delta"]
+        self.payment_method = result.get("payment_method")
+        self.refresh_after_sale()
+
+    def record_sale(self, refresh_ui=True):
+        snapshot = self._build_sale_snapshot()
+
+        if not refresh_ui:
+            return self._record_sale_worker(snapshot)
+
+        result = self._record_sale_worker(snapshot)
+        self.apply_sale_result(result)
+        return result
+
+    def start_sale_recording(self, *, on_success=None, on_error=None):
+        snapshot = self._build_sale_snapshot()
+
+        def task():
+            return self._record_sale_worker(snapshot)
+
+        def done(err, result=None):
+            if err:
+                if on_error:
+                    on_error(err)
+                return
+
+            self.apply_sale_result(result)
+            if on_success:
+                on_success()
+
+        self.run_async(task, on_done=done)
 
     # -------------------------
     # frame switching & timer
     # -------------------------
     def show_frame(self, cls, timeout_ms=None, pause=False, skip_error_check=False):
+        if self.busy and cls is not ProcessingScreen:
+            return
         frame = self.frames[cls]
 
         # BEFORE we raise the requested frame, check global error state
@@ -347,30 +456,44 @@ class App(tk.Tk):
         self.reset_timer()
 
     def on_timeout(self):
+        if self.busy:
+            return
         self.log("Inactivity timeout — returning to WelcomeScreen and clearing selections")
         self.selected_fruits.clear()
         self.selected_addons.clear()
         self.selected_ratio = None
         self.show_frame(WelcomeScreen, pause=True)
 
-    def calculate_total(self):
-        fruit_total = sum(self.catalog[k]["price"] for k in self.selected_fruits)
-        addon_total = sum(self.addons[k]["price"] for k in self.selected_addons)
+    def calculate_total_for_selection(self, fruits=None, addons=None, *, emit_log=True):
+        fruits = list(self.selected_fruits if fruits is None else fruits)
+        addons = set(self.selected_addons if addons is None else addons)
+
+        fruit_total = sum(self.catalog[k]["price"] for k in fruits)
+        addon_total = sum(self.addons[k]["price"] for k in addons)
         base_total = 50
 
-        fruit_count = len(self.selected_fruits)
+        fruit_count = len(fruits)
 
         # Reduce price based on amount of fruit selected
         fruit_discount = {
             1: 1.00,  # no discount
-            2: 0.80,  
-            3: 0.60,  
+            2: 0.80,
+            3: 0.60,
         }.get(fruit_count, 1.00)
 
         discounted_fruit_total = fruit_total * fruit_discount
-        self.log("Original Amount: " + money_str(base_total + fruit_total + addon_total) + "| Discounted Amount: " + money_str(base_total + discounted_fruit_total + addon_total))
+        if emit_log:
+            self.log(
+                "Original Amount: "
+                + money_str(base_total + fruit_total + addon_total)
+                + "| Discounted Amount: "
+                + money_str(base_total + discounted_fruit_total + addon_total)
+            )
         # round up to peso dahil sino naman nagdadala ng centavos
         return math.ceil(base_total + discounted_fruit_total + addon_total)
+
+    def calculate_total(self):
+        return self.calculate_total_for_selection()
         
     def check_error_state(self):
         """Return True if an error condition exists (ingredients out of stock OR all fruits out of stock)."""
@@ -406,3 +529,108 @@ class App(tk.Tk):
             pass
 
         self.after(50, self._poll_cash_queue)
+
+    def show_loading_gif(self, canvas):
+        self.busy = True
+        self.pause_inactivity()
+        self.loading_canvas = canvas
+        self.loading_frame_index = 0
+
+        if self.loading_overlay_photo is not None:
+            self.loading_overlay_item = canvas.create_image(
+                0,
+                0,
+                anchor="nw",
+                image=self.loading_overlay_photo,
+            )
+
+        if not self.loading_frames:
+            return
+
+        self.loading_item = canvas.create_image(
+            SCREEN_W // 2,
+            SCREEN_H // 2,
+            anchor="center",
+            image=self.loading_frames[0],
+        )
+        self._animate_loading_gif()
+
+    def _animate_loading_gif(self):
+        if not self.busy or not self.loading_canvas or not self.loading_frames:
+            return
+
+        self.loading_frame_index = (self.loading_frame_index + 1) % len(self.loading_frames)
+        frame = self.loading_frames[self.loading_frame_index]
+        delay = self.loading_delays[self.loading_frame_index] if self.loading_delays else 80
+
+        try:
+            self.loading_canvas.itemconfigure(self.loading_item, image=frame)
+        except Exception:
+            return
+
+        self.loading_job = self.loading_canvas.after(delay, self._animate_loading_gif)
+
+    def hide_loading_gif(self):
+        self.busy = False
+
+        if self.loading_canvas and self.loading_job:
+            try:
+                self.loading_canvas.after_cancel(self.loading_job)
+            except Exception:
+                pass
+
+        if self.loading_canvas and self.loading_item:
+            try:
+                self.loading_canvas.delete(self.loading_item)
+            except Exception:
+                pass
+
+        if self.loading_canvas and self.loading_overlay_item:
+            try:
+                self.loading_canvas.delete(self.loading_overlay_item)
+            except Exception:
+                pass
+
+        self.loading_canvas = None
+        self.loading_item = None
+        self.loading_overlay_item = None
+        self.loading_job = None
+        self.resume_inactivity()
+
+    def run_async(self, task, on_done=None):
+        def worker():
+            err = None
+            result = None
+            try:
+                result = task()
+            except Exception as e:
+                err = e
+
+            def finish():
+                if on_done:
+                    try:
+                        on_done(err, result)
+                    except TypeError:
+                        on_done(err)
+
+            self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def refresh_after_sale(self):
+        fs = self.frames.get(FruitSelectionScreen)
+        if fs:
+            try:
+                fs.update_fruit_states()
+                fs.update_overlays()
+                fs.render_summary()
+            except Exception:
+                pass
+
+        ads = self.frames.get(AddOnScreen)
+        if ads:
+            try:
+                ads.update_addon_states()
+                ads.render_summary()
+            except Exception:
+                pass

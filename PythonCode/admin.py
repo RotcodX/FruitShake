@@ -35,6 +35,8 @@ class AdminPanel(tk.Frame):
         self.admin_visible = False  # compatibility alias
         self._fs_btn = None
         self._recheck_btn = None
+        self._upload_btn = None
+        self._check_machine_btn = None
         self.admin_rows_parent = None
 
         self._build_ui()
@@ -69,12 +71,21 @@ class AdminPanel(tk.Frame):
         self._fs_btn = tk.Button(self, text="", command=self._toggle_fullscreen)
         self._fs_btn.place(x=0, y=0, anchor="nw")
 
-        # Optional Recheck Stock button
+        # Bottom-left action buttons
         if self.show_recheck_stock:
+            # Recheck stock button, for refresh and exit ng admin panel if stock is OK
             self._recheck_btn = tk.Button(self, text="Recheck Stock", command=self._on_recheck_stock)
-            self._recheck_btn.place(x=0, y=self.panel_height - 10, anchor="sw")
+            self._recheck_btn.place(x=0, y=self.panel_height - 10, anchor="sw") 
+            # Upload stock to database
+            self._upload_btn = tk.Button(self, text="Upload Stock", command=self._on_upload_stock)
+            self._upload_btn.place(x=120, y=self.panel_height - 10, anchor="sw")
+            # Disabled for now since wala pang machine stock checker
+            self._check_machine_btn = tk.Button(self, text="Check Machine Stock (test)", command=self._on_check_machine_stock)
+            self._check_machine_btn.place(x=240, y=self.panel_height - 10, anchor="sw")
         else:
             self._recheck_btn = None
+            self._upload_btn = None
+            self._check_machine_btn = None
 
         # Rows area
         rows_top = 0.075 if self.show_recheck_stock else 0.03
@@ -85,8 +96,9 @@ class AdminPanel(tk.Frame):
 
         self.refresh()
 
-    def show(self):
-        self.refresh()
+    def show(self, skip_refresh=False):
+        if not skip_refresh:
+            self.refresh()
         self.place(relx=0.5, rely=0.5, anchor="center")
         self.visible = True
         self.admin_visible = True
@@ -257,6 +269,21 @@ class AdminPanel(tk.Frame):
             except Exception:
                 pass
 
+    def _refresh_related_ui(self):
+        self._refresh_fruit_screen()
+
+        # Simpler fallback: scan frames for any visible admin_panel attribute
+        try:
+            for frame in getattr(self.controller, "frames", {}).values():
+                panel = getattr(frame, "admin_panel", None)
+                if panel is not None and panel is not self:
+                    try:
+                        panel.refresh()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def _change_fruit_stock(self, key, delta):
         item = self.controller.catalog.get(key)
         if not item:
@@ -306,24 +333,200 @@ class AdminPanel(tk.Frame):
         self.controller.log("Admin reset total income")
         self.refresh()
 
-    def _on_recheck_stock(self):
-        """
-        Recheck the inventory.
-        - If the system is healthy, optionally return to a target screen.
-        - If not, stay on the admin panel.
-        """
-        self.controller.log("Admin: rechecking stock")
-        self.controller.update_best_sellers()
-        self.refresh()
+    def _upload_stock_worker(self):
+        self.controller.log("Admin: uploading panel stock to Supabase")
 
-        if self.return_to_cls is not None and not self.controller.check_error_state():
-            self.controller.log("Stock OK after recheck")
-            try:
-                self.controller.show_frame(self.return_to_cls, pause=True, skip_error_check=True)
-            except TypeError:
-                self.controller.show_frame(self.return_to_cls, pause=True)
-        else:
-            if self.controller.check_error_state():
-                self.controller.log("Stock still invalid — staying on admin panel")
+        # Fruits
+        for key, item in self.controller.catalog.items():
+            self.controller.supabase.table("fruits").update({
+                "stock": item.get("stock", 0),
+                "sales": item.get("sales", 0),
+                "best_seller": item.get("best_seller", False),
+            }).eq("id", item["id"]).execute()
+
+        # Add-ons
+        for key, item in self.controller.addons.items():
+            self.controller.supabase.table("addons").update({
+                "stock": item.get("stock", 0),
+                "sales": item.get("sales", 0),
+            }).eq("id", item["id"]).execute()
+
+        # Ingredients
+        for key, item in self.controller.ingredients.items():
+            self.controller.supabase.table("ingredients").update({
+                "stock": item.get("stock", 0),
+            }).eq("id", item["id"]).execute()
+
+        return True
+
+    def _machine_stock_check_worker(self):
+        """
+        Placeholder machine-stock check.
+
+        For now this does not read real hardware. It simply returns the current
+        in-memory stock values as the "measured" machine stock so the full admin
+        flow can be tested before physical stock sensing exists.
+        """
+        self.controller.log("Admin: checking machine stock (placeholder)")
+
+        measured_catalog = {
+            key: int(item.get("stock", 0))
+            for key, item in self.controller.catalog.items()
+        }
+        measured_addons = {
+            key: int(item.get("stock", 0))
+            for key, item in self.controller.addons.items()
+        }
+        measured_ingredients = {
+            key: int(item.get("stock", 0))
+            for key, item in self.controller.ingredients.items()
+        }
+
+        return {
+            "catalog_stock": measured_catalog,
+            "addon_stock": measured_addons,
+            "ingredient_stock": measured_ingredients,
+        }
+
+    def _apply_machine_stock_result(self, result):
+        for key, stock in result.get("catalog_stock", {}).items():
+            if key in self.controller.catalog:
+                self.controller.catalog[key]["stock"] = max(0, int(stock))
+
+        for key, stock in result.get("addon_stock", {}).items():
+            if key in self.controller.addons:
+                self.controller.addons[key]["stock"] = max(0, int(stock))
+
+        for key, stock in result.get("ingredient_stock", {}).items():
+            if key in self.controller.ingredients:
+                self.controller.ingredients[key]["stock"] = max(0, int(stock))
+
+    def _on_recheck_stock(self):
+        if self.controller.busy:
+            return
+
+        parent_canvas = getattr(self.master, "canvas", None)
+
+        # Hide admin first so the loading GIF is visible on the screen canvas
+        was_visible = self.visible
+        if was_visible:
+            self.hide()
+
+        if parent_canvas is not None:
+            self.controller.show_loading_gif(parent_canvas)
+
+        def task():
+            self.controller.log("Admin: rechecking stock")
+            self.controller.update_best_sellers()
+            return True
+
+        def done(err, result=None):
+            if parent_canvas is not None:
+                self.controller.hide_loading_gif()
+
+            if err:
+                self.controller.log(f"Admin recheck failed: {err}")
+                if was_visible:
+                    self.show(skip_refresh=True)
+                    self.refresh()
+                return
+
+            self.refresh()
+
+            if self.return_to_cls is not None and not self.controller.check_error_state():
+                self.controller.log("Stock OK after recheck")
+                try:
+                    self.controller.show_frame(self.return_to_cls, pause=True, skip_error_check=True)
+                except TypeError:
+                    self.controller.show_frame(self.return_to_cls, pause=True)
             else:
-                self.controller.log("Recheck complete")
+                if self.controller.check_error_state():
+                    self.controller.log("Stock still invalid — staying on admin panel")
+                    self.show(skip_refresh=True)
+                else:
+                    self.controller.log("Recheck complete")
+                    self.show(skip_refresh=True)
+
+                self.refresh()
+
+        self.controller.run_async(task, on_done=done)
+
+    def _on_upload_stock(self):
+        if self.controller.busy:
+            return
+
+        parent_canvas = getattr(self.master, "canvas", None)
+        was_visible = self.visible
+
+        if was_visible:
+            self.hide()
+
+        if parent_canvas is not None:
+            self.controller.show_loading_gif(parent_canvas)
+
+        def task():
+            self.controller.log("Admin: upload stock started")
+            self.controller.update_best_sellers()
+            return self._upload_stock_worker()
+
+        def done(err, result=None):
+            if parent_canvas is not None:
+                self.controller.hide_loading_gif()
+
+            if err:
+                self.controller.log(f"Admin upload stock failed: {err}")
+            else:
+                self.controller.log("Admin: upload stock complete")
+
+            if was_visible:
+                self.show(skip_refresh=True)
+            self.refresh()
+            self._refresh_related_ui()
+
+        self.controller.run_async(task, on_done=done)
+
+    def _on_check_machine_stock(self):
+        if self.controller.busy:
+            return
+
+        parent_canvas = getattr(self.master, "canvas", None)
+        was_visible = self.visible
+
+        if was_visible:
+            self.hide()
+
+        if parent_canvas is not None:
+            self.controller.show_loading_gif(parent_canvas)
+
+        def task():
+            result = self._machine_stock_check_worker()
+            return result
+
+        def done(err, result=None):
+            if parent_canvas is not None:
+                self.controller.hide_loading_gif()
+
+            if err:
+                self.controller.log(f"Admin machine stock check failed: {err}")
+                if was_visible:
+                    self.show(skip_refresh=True)
+                    self.refresh()
+                return
+
+            # Apply the placeholder measured stock to the admin/controller state
+            self._apply_machine_stock_result(result)
+            self.controller.update_best_sellers()
+
+            self.controller.log("Admin: machine stock check complete (placeholder)")
+            self.controller.log("Admin: auto-uploading checked machine stock")
+
+            # Re-show first so the user returns to a normal state after upload completes
+            if was_visible:
+                self.show(skip_refresh=True)
+
+            # Chain into upload so checked stock is immediately pushed to Supabase
+            self.refresh()
+            self._refresh_related_ui()
+            self._on_upload_stock()
+
+        self.controller.run_async(task, on_done=done)
