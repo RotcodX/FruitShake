@@ -79,8 +79,8 @@ class App(tk.Tk):
         self.selected_ratio = None
 
         # inactivity timer
-        self.default_timeout_ms = 120000
-        self.timeout_warning_ms = 60000          # show warning when 1 minute remains
+        self.default_timeout_ms = 30000 # 120000 (base value)
+        self.timeout_warning_ms = 20000 # 60000 (base value, show warning when 1 minute remains)
         self.timeout_countdown_ms = 10000        # switch to countdown at 10 seconds remaining
         self.timeout_warning_poll_ms = 500       # warning state refresh interval
         self.active_timeout_ms = self.default_timeout_ms

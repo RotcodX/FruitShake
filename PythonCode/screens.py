@@ -8,7 +8,7 @@ import tkinter.font as tkfont
 from decimal import Decimal, ROUND_HALF_UP
 from PIL import Image, ImageTk
 from admin import AdminPanel
-from ui_common import ASSETS_DIR, OutlinedText, SCREEN_W, SCREEN_H
+from ui_common import OutlinedText, SCREEN_W, SCREEN_H
 from ui_common import (
     FONT_INTER,
     ASSETS_DIR,
@@ -29,7 +29,7 @@ class WelcomeScreen(tk.Frame):
         self.controller = controller
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        self.bg_img = load_image_tk("welcomeScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("1WelcomeScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
@@ -125,17 +125,17 @@ class FruitSelectionScreen(tk.Frame):
         # canvas + background
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        self.bg_img = load_image_tk("2_CLEAN_fruitSelectionScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("2FruitSelectionScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
         # approximate touch zones for the fruit images (x1,y1,x2,y2)
         self.fruit_zones = {
-            "fruit1": (50, 115, 225, 340),
-            "fruit2": (225, 300, 400, 525),
-            "fruit3": (425, 115, 600, 340),
-            "fruit4": (625, 300, 800, 525),
-            "fruit5": (800, 115, 975, 340),
+            "fruit1": (11, 111, 227, 386),
+            "fruit2": (220, 280, 415, 546),
+            "fruit3": (408, 129, 616, 399),
+            "fruit4": (609, 280, 807, 546),
+            "fruit5": (800, 111, 1012, 386),
         }
 
         # create invisible rectangles for each zone and bind click
@@ -225,6 +225,7 @@ class FruitSelectionScreen(tk.Frame):
 
         # selected highlight overlay tag
         self.sel_overlay_tag = "sel_overlay"
+        self.show_selection_debug_rect = True   # set False for final release to disable select squares
 
         # -----------------------
         # PRELOAD small overlay images into a cache to avoid heavy Image.open / PhotoImage
@@ -243,9 +244,13 @@ class FruitSelectionScreen(tk.Frame):
                 zone_w = max(1, x2 - x1)
                 zone_h = max(1, y2 - y1)
 
-                # filenames you use in update_overlays:
-                for suffix, cache_tag in (("BestSeller.png", "best"), ("Stock.png", "stock")):
-                    fname = f"{asset_base}{suffix}"
+                # filenames you use in update_overlays / update_fruit_states
+                for builder, cache_tag in (
+                    (lambda a: f"bs{a}.png", "best"),
+                    (lambda a: f"stock{a}.png", "stock"),
+                    (lambda a: f"select{a}.png", "select"),
+                ):
+                    fname = builder(asset_base)
                     if file_exists(fname):
                         try:
                             # load once and resize to zone size where appropriate
@@ -418,12 +423,86 @@ class FruitSelectionScreen(tk.Frame):
         self.render_summary()
 
     def update_fruit_states(self):
-        # selected highlight rectangles
+        # clear previous selected-state visuals
         self.canvas.delete(self.sel_overlay_tag)
+
         for key, (x1, y1, x2, y2) in self.fruit_zones.items():
-            if key in self.controller.selected_fruits:
-                # draw a yellow rectangle inset to indicate selection
-                self.canvas.create_rectangle(x1+4, y1+4, x2-4, y2-4, outline="yellow", width=4, tags=(self.sel_overlay_tag,))
+            if key not in self.controller.selected_fruits:
+                continue
+
+            meta = self.controller.catalog.get(key, {})
+            asset_base = meta.get("asset_name")
+            center_x = (x1 + x2) // 2
+            center_y = (y1 + y2) // 2
+
+            # 1) draw selected overlay image, similar to best/stock overlays
+            if asset_base:
+                photo = self._overlay_cache.get((key, "select"))
+                if photo is not None:
+                    try:
+                        if photo.width() == SCREEN_W and photo.height() == SCREEN_H:
+                            item = self.canvas.create_image(
+                                0, 0,
+                                anchor="nw",
+                                image=photo,
+                                tags=(self.sel_overlay_tag,)
+                            )
+                        else:
+                            item = self.canvas.create_image(
+                                center_x, center_y,
+                                anchor="center",
+                                image=photo,
+                                tags=(self.sel_overlay_tag,)
+                            )
+                        try:
+                            self.canvas.itemconfigure(item, state="disabled")
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        self.controller.log(f"Failed to draw selected overlay for {key}: {e}")
+                else:
+                    # fallback load on demand
+                    fname = f"select{asset_base}.png"
+                    if file_exists(fname):
+                        try:
+                            img = Image.open(os.path.join(ASSETS_DIR, fname))
+                            if img.size == (SCREEN_W, SCREEN_H):
+                                photo = ImageTk.PhotoImage(img)
+                                item = self.canvas.create_image(
+                                    0, 0,
+                                    anchor="nw",
+                                    image=photo,
+                                    tags=(self.sel_overlay_tag,)
+                                )
+                            else:
+                                w = x2 - x1
+                                h = y2 - y1
+                                photo = ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS))
+                                item = self.canvas.create_image(
+                                    center_x, center_y,
+                                    anchor="center",
+                                    image=photo,
+                                    tags=(self.sel_overlay_tag,)
+                                )
+
+                            try:
+                                self.canvas.itemconfigure(item, state="disabled")
+                            except Exception:
+                                pass
+
+                            # hold reference so PhotoImage is not garbage-collected
+                            self.overlay_refs.setdefault(f"{key}_select_runtime", []).append(photo)
+                        except Exception as e:
+                            self.controller.log(f"Failed to load selected overlay image {fname}: {e}")
+
+            # 2) optional debug click-area rectangle
+            if getattr(self, "show_selection_debug_rect", True):
+                self.canvas.create_rectangle(
+                    x1 + 4, y1 + 4, x2 - 4, y2 - 4,
+                    outline="yellow",
+                    width=4,
+                    tags=(self.sel_overlay_tag,)
+                )
     
     def update_overlays(self):
         """
@@ -485,7 +564,7 @@ class FruitSelectionScreen(tk.Frame):
                         item_ids.append(item); photo_refs.append(photo)
                 else:
                     # fallback: try load on demand but keep it safe
-                    fname = f"{asset_base}BestSeller.png"
+                    fname = f"bs{asset_base}.png"
                     if file_exists(fname):
                         try:
                             img = Image.open(os.path.join(ASSETS_DIR, fname))
@@ -509,7 +588,7 @@ class FruitSelectionScreen(tk.Frame):
                     if item:
                         item_ids.append(item); photo_refs.append(photo)
                 else:
-                    fname = f"{asset_base}Stock.png"
+                    fname = f"stock{asset_base}.png"
                     if file_exists(fname):
                         try:
                             img = Image.open(os.path.join(ASSETS_DIR, fname))
@@ -565,7 +644,7 @@ class AddOnScreen(tk.Frame):
         self.controller = controller
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        self.bg_img = load_image_tk("3_CLEAN_extraSelectionScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("3ExtraSelectionScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
@@ -600,7 +679,7 @@ class AddOnScreen(tk.Frame):
 
         try:
             for key, asset_base in (("pearls", "pearls"), ("cheese", "cheese")):
-                fname = f"{asset_base}Stock.png"
+                fname = f"stockA{asset_base}.png"
                 if file_exists(fname):
                     img = Image.open(os.path.join(ASSETS_DIR, fname))
                     photo = ImageTk.PhotoImage(img)  # full-screen image, no resize needed
@@ -705,7 +784,7 @@ class SummaryScreen(tk.Frame):
         # Canvas + background image (same pattern as your other screens)
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        self.bg_img = load_image_tk("4_CLEAN_orderSummaryScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("4OrderSummaryScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
@@ -784,7 +863,7 @@ class PaymentSelectionScreen(tk.Frame):
         self.controller = controller
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        self.bg_img = load_image_tk("5_CLEAN_paymentSelectionScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("5PaymentSelectionScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
@@ -826,7 +905,7 @@ class CashMethodScreen(tk.Frame):
         # Canvas + background
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        self.bg_img = load_image_tk("5A_CLEAN_cashMethodScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("5ACashMethodScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
 
         # Global tap feedback binding
@@ -1110,7 +1189,7 @@ class PaypalMethodScreen(tk.Frame):
         self.controller = controller
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        self.bg_img = load_image_tk("5B_CLEAN_paypalMethodScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("5BPaypalMethodScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
         # QR placeholder
@@ -1204,7 +1283,7 @@ class ProcessingScreen(tk.Frame):
         self.canvas.place(x=0, y=0)
 
         # background image (full-screen)
-        self.bg_img = load_image_tk("6_CLEAN_orderProgressScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("6OrderProgressScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
 
         # touch feedback on tap
@@ -1578,7 +1657,7 @@ class OrderCompleteScreen(tk.Frame):
         self.controller = controller
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
-        self.bg_img = load_image_tk("completeScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("7CompleteScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
         self.canvas.bind("<Button-1>", lambda e: controller.log("OrderComplete tapped") or controller.show_frame(WelcomeScreen, pause=True))
@@ -1592,7 +1671,7 @@ class ErrorScreen(tk.Frame):
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
 
-        self.bg_img = load_image_tk("errorScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("0errorScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
 
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
