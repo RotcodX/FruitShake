@@ -6,12 +6,14 @@ import uuid
 import tkinter as tk
 import queue
 import threading
+import requests
 
 from PIL import Image, ImageTk
 from dotenv import load_dotenv
 from supabase import create_client
 from supabase.client import ClientOptions
 from ui_common import SCREEN_W, SCREEN_H, load_gif_frames
+from local_db import LocalDB
 # from hardware import HardwareManager # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
 
 from ui_common import (
@@ -62,8 +64,14 @@ class App(tk.Tk):
 
         self.touch_feedback = TouchFeedbackManager(self)
         self.supabase = create_client(url, key)
+        self.local_db = LocalDB()
 
-        # Load remote data before building the UI
+        # data containers must exist before any online/offline load path
+        self.catalog = {}
+        self.addons = {}
+        self.ingredients = {}
+
+        # Load startup data before building the UI
         self.load_remote_data()
 
         # Database Payment tracking
@@ -154,8 +162,14 @@ class App(tk.Tk):
 
     # Database
     def load_remote_data(self):
-        self.log("=== Loading remote inventory from Supabase ===")
+        self.log("Initializing inventory...")
 
+        # Step 1: check if Supabase is reachable
+        if not self.is_supabase_available():
+            self.log("Supabase unavailable. Falling back to local database.")
+            self.load_from_local_db()
+            return
+        self.log("Supabase available. Loading remote inventory...")
         # Fruits
         res = self.supabase.table("fruits").select("*").execute()
         fruit_rows = getattr(res, "data", []) or []
@@ -221,6 +235,13 @@ class App(tk.Tk):
         self.log(f"Loaded addons count: {len(self.addons)}")
         self.log(f"Loaded ingredients count: {len(self.ingredients)}")
         self.log("=== Finished loading remote inventory ===")
+        try:
+            self.local_db.replace_fruits(self.catalog)
+            self.local_db.replace_addons(self.addons)
+            self.local_db.replace_ingredients(self.ingredients)
+            self.log("Local SQLite inventory snapshot updated.")
+        except Exception as e:
+            self.log(f"Failed to save startup data to local SQLite: {e}")
 
     # -------------------------
     # logging / debug helpers
@@ -447,7 +468,7 @@ class App(tk.Tk):
         }
         return flags, max_sales
 
-    def update_best_sellers(self):
+    def update_best_sellers(self, sync_remote=False):
         """Set catalog[*]['best_seller'] True for fruit(s) with the highest sales (>0)."""
         flags, max_sales = self._compute_best_seller_flags()
         if not flags:
@@ -458,10 +479,20 @@ class App(tk.Tk):
 
         self.log(f"Best-seller updated (max sales={max_sales})")
 
-        for key, fruit in self.catalog.items():
-            self.supabase.table("fruits").update({
-                "best_seller": fruit["best_seller"]
-            }).eq("id", fruit["id"]).execute()
+        if not sync_remote:
+            return
+
+        if not self.is_supabase_available():
+            self.log("Supabase unavailable; skipping best-seller sync.")
+            return
+
+        try:
+            for key, fruit in self.catalog.items():
+                self.supabase.table("fruits").update({
+                    "best_seller": fruit["best_seller"]
+                }).eq("id", fruit["id"]).execute()
+        except Exception as e:
+            self.log(f"Failed to sync best-seller flags to Supabase: {e}")
 
     def _build_sale_snapshot(self):
         return {
@@ -471,93 +502,103 @@ class App(tk.Tk):
         }
 
     def _record_sale_worker(self, snapshot):
-        selected_fruits = snapshot["selected_fruits"]
-        selected_addons = snapshot["selected_addons"]
-        payment_method = snapshot["payment_method"]
+        try:
+            selected_fruits = snapshot["selected_fruits"]
+            selected_addons = snapshot["selected_addons"]
+            payment_method = snapshot["payment_method"]
 
-        total = self.calculate_total_for_selection(selected_fruits, selected_addons, emit_log=False)
+            total = self.calculate_total_for_selection(
+                selected_fruits,
+                selected_addons,
+                emit_log=False
+            )
 
-        self.log(f"Recording sale for: {selected_fruits}")
-        self.log(f"Recording sale for add-ons: {selected_addons}")
+            self.log(f"Recording sale for: {selected_fruits}")
+            self.log(f"Recording sale for add-ons: {selected_addons}")
 
-        fruit_updates = {}
-        updated_catalog = {
-            key: dict(item)
-            for key, item in self.catalog.items()
-        }
-        for key in selected_fruits:
-            item = updated_catalog.get(key)
-            if not item:
-                continue
-            item["stock"] = max(0, item.get("stock", 0) - 1)
-            item["sales"] = item.get("sales", 0) + 1
-            fruit_updates[key] = {
-                "stock": item["stock"],
-                "sales": item["sales"],
+            # -------------------------
+            # STEP 1: BUILD SALE ROW
+            # -------------------------
+            sale_row = {
+                "sale_id": str(uuid.uuid4()),
+                "total_price": total,
+                "payment_method": payment_method,
+                "selected_fruits": selected_fruits,
+                "selected_addons": selected_addons,
             }
-            self.supabase.table("fruits").update(fruit_updates[key]).eq("id", item["id"]).execute()
 
-        addon_updates = {}
-        updated_addons = {
-            key: dict(item)
-            for key, item in self.addons.items()
-        }
-        for key in selected_addons:
-            item = updated_addons.get(key)
-            if not item:
-                continue
-            item["stock"] = max(0, item.get("stock", 0) - 1)
-            item["sales"] = item.get("sales", 0) + 1
-            addon_updates[key] = {
-                "stock": item["stock"],
-                "sales": item["sales"],
+            # -------------------------
+            # STEP 2: SAVE LOCALLY FIRST
+            # -------------------------
+            try:
+                self.local_db.insert_sale(sale_row)
+                self.log(f"Sale saved locally: {sale_row['sale_id']}")
+            except Exception as e:
+                self.log(f"Local sale save FAILED: {e}")
+                raise
+
+            # -------------------------
+            # STEP 3: UPDATE LOCAL MEMORY
+            # -------------------------
+            for key in selected_fruits:
+                if key in self.catalog:
+                    self.catalog[key]["stock"] = max(0, self.catalog[key]["stock"] - 1)
+                    self.catalog[key]["sales"] += 1
+
+            for key in selected_addons:
+                if key in self.addons:
+                    self.addons[key]["stock"] = max(0, self.addons[key]["stock"] - 1)
+                    self.addons[key]["sales"] += 1
+
+            for key in self.ingredients:
+                self.ingredients[key]["stock"] = max(0, self.ingredients[key]["stock"] - 1)
+
+            # persist updated inventory locally
+            try:
+                self.local_db.replace_fruits(self.catalog)
+                self.local_db.replace_addons(self.addons)
+                self.local_db.replace_ingredients(self.ingredients)
+            except Exception as e:
+                self.log(f"Local inventory save failed: {e}")
+
+            # -------------------------
+            # STEP 4: TRY SUPABASE (OPTIONAL)
+            # -------------------------
+            if not self.is_supabase_available():
+                self.log("Offline mode: sale queued locally.")
+                return {
+                    "catalog": self.catalog,
+                    "addons": self.addons,
+                    "ingredients": self.ingredients,
+                    "total_income_delta": total,
+                    "payment_method": payment_method,
+                }
+
+            try:
+                # insert sale to Supabase
+                self.supabase.table("sales").insert({
+                    "sale_id": sale_row["sale_id"],
+                    "total_price": total,
+                    "payment_method": payment_method,
+                    "selected_fruits": ", ".join(self.catalog[k]["name"] for k in selected_fruits),
+                    "selected_addons": ", ".join(self.addons[k]["name"] for k in selected_addons) if selected_addons else None,
+                }).execute()
+
+                self.log("Sale synced to Supabase.")
+
+            except Exception as e:
+                self.log(f"Supabase sync failed (kept local): {e}")
+
+            return {
+                "catalog": self.catalog,
+                "addons": self.addons,
+                "ingredients": self.ingredients,
+                "total_income_delta": total,
+                "payment_method": payment_method,
             }
-            self.supabase.table("addons").update(addon_updates[key]).eq("id", item["id"]).execute()
 
-        ingredient_updates = {}
-        updated_ingredients = {
-            key: dict(item)
-            for key, item in self.ingredients.items()
-        }
-        for key, item in updated_ingredients.items():
-            item["stock"] = max(0, item.get("stock", 0) - 1)
-            ingredient_updates[key] = {"stock": item["stock"]}
-            self.supabase.table("ingredients").update(ingredient_updates[key]).eq("id", item["id"]).execute()
-
-        best_seller_flags, max_sales = self._compute_best_seller_flags(updated_catalog)
-        for key, is_best in best_seller_flags.items():
-            updated_catalog[key]["best_seller"] = is_best
-            self.supabase.table("fruits").update({
-                "best_seller": is_best
-            }).eq("id", updated_catalog[key]["id"]).execute()
-
-        sale_row = {
-            "sale_id": str(uuid.uuid4()),
-            "total_price": total,
-            "payment_method": payment_method,
-            "selected_fruits": ", ".join(
-                updated_catalog[key]["name"]
-                for key in selected_fruits
-                if key in updated_catalog
-            ),
-            "selected_addons": ", ".join(
-                updated_addons[key]["name"]
-                for key in selected_addons
-                if key in updated_addons
-            ) if selected_addons else None,
-        }
-        self.supabase.table("sales").insert(sale_row).execute()
-
-        self.log("Added Income: " + money_str(total))
-        self.log(f"Best-seller updated (max sales={max_sales})")
-
-        return {
-            "catalog": updated_catalog,
-            "addons": updated_addons,
-            "ingredients": updated_ingredients,
-            "total_income_delta": total,
-            "payment_method": payment_method,
-        }
+        except Exception as e:
+            self.log(f"_record_sale_worker crash: {e}")
 
     def apply_sale_result(self, result):
         self.catalog = result["catalog"]
@@ -850,3 +891,63 @@ class App(tk.Tk):
                 ads.render_summary()
             except Exception:
                 pass
+
+    def is_supabase_available(self) -> bool:
+        try:
+            # lightweight check (fast fail if offline)
+            self.supabase.table("fruits").select("id").limit(1).execute()
+            return True
+        except Exception as e:
+            self.log(f"Supabase not available: {e}")
+            return False
+        
+    def load_from_local_db(self):
+        self.log("Loading inventory from local SQLite...")
+
+        try:
+            # Fruits
+            self.catalog.clear()
+            fruit_rows = self.local_db.load_fruits()
+            for i, row in enumerate(fruit_rows, start=1):
+                key = f"fruit{i}"
+                self.catalog[key] = {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "price": row["price"],
+                    "stock": row["stock"],
+                    "sales": row["sales"],
+                    "best_seller": bool(row["best_seller"]),
+                    "asset_name": row["asset_name"],
+                }
+
+            # Add-ons
+            self.addons.clear()
+            addon_rows = self.local_db.load_addons()
+            for row in addon_rows:
+                key = row["name"].lower().replace(" ", "")
+                self.addons[key] = {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "price": row["price"],
+                    "stock": row["stock"],
+                    "sales": row["sales"],
+                }
+
+            # Ingredients
+            self.ingredients.clear()
+            ingredient_rows = self.local_db.load_ingredients()
+            for row in ingredient_rows:
+                key = row["name"].lower()
+                self.ingredients[key] = {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "stock": row["stock"],
+                }
+
+            self.log(f"Loaded local fruits count: {len(self.catalog)}")
+            self.log(f"Loaded local addons count: {len(self.addons)}")
+            self.log(f"Loaded local ingredients count: {len(self.ingredients)}")
+            self.log("Loaded inventory from local SQLite successfully.")
+
+        except Exception as e:
+            self.log(f"Failed to load from local DB: {e}")
