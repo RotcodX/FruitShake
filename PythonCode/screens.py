@@ -1717,7 +1717,7 @@ class ErrorScreen(tk.Frame):
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
         self.canvas.place(x=0, y=0)
 
-        self.bg_img = load_image_tk("0errorScreen.png", resize_to=(SCREEN_W, SCREEN_H))
+        self.bg_img = load_image_tk("0ErrorScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
 
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
