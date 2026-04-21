@@ -15,8 +15,8 @@ from supabase.client import ClientOptions
 from ui_common import SCREEN_W, SCREEN_H, load_gif_frames
 from local_db import LocalDB
 # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
-""" from hardware import HardwareManager 
-from hardware import MachineController """
+from hardware import HardwareManager 
+from hardware import MachineController
 
 from ui_common import (
     money_str,
@@ -151,8 +151,8 @@ class App(tk.Tk):
 
         self.cash_queue = queue.Queue()
         # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
-        """ self.hardware = HardwareManager(self)
-        self.machine = MachineController() """
+        self.hardware = HardwareManager(self)
+        self.machine = MachineController()
         self.after(50, self._poll_cash_queue)
 
         # global input bindings to reset timer
@@ -817,18 +817,27 @@ class App(tk.Tk):
         if not any_in_stock:
             return True
         return False
+    
     def queue_cash(self, amount):
+        self.log(f"queue_cash: received amount ₱{float(amount):.2f}")
         self.cash_queue.put(amount)
 
     def _poll_cash_queue(self):
         try:
             while True:
                 amount = self.cash_queue.get_nowait()
+                self.log(f"_poll_cash_queue: dequeued ₱{float(amount):.2f}")
+
                 cash_screen = self.frames.get(CashMethodScreen)
                 if cash_screen:
+                    self.log("_poll_cash_queue: forwarding amount to CashMethodScreen.add_cash()")
                     cash_screen.add_cash(amount)
-        except Exception:
+                else:
+                    self.log("_poll_cash_queue: CashMethodScreen not found")
+        except queue.Empty:
             pass
+        except Exception as e:
+            self.log(f"_poll_cash_queue error: {e}")
 
         self.after(50, self._poll_cash_queue)
 

@@ -1141,6 +1141,7 @@ class CashMethodScreen(tk.Frame):
     # -------------------------
     def add_cash(self, amount):
         """Called to add money from hardware or admin simulator."""
+        self.controller.log(f"CashMethod.add_cash called with amount={amount}")
         try:
             amount = float(amount)
         except Exception:

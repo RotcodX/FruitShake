@@ -98,9 +98,19 @@ class CoinAcceptor:
 
     def _on_pulse(self, channel):
         now = time.monotonic()
+        dt = now - self.last_interrupt if self.last_interrupt else 0.0
+
+        self.app.log(
+            f"{self.name}: raw pulse detected on GPIO {self.pin} "
+            f"(dt={dt:.6f}s, count_before={self.pulse_count})"
+        )
 
         # noise filter (same as Arduino)
         if (now - self.last_interrupt) < self.noise_filter:
+            self.app.log(
+                f"{self.name}: pulse ignored by noise_filter "
+                f"(dt={now - self.last_interrupt:.6f}s < {self.noise_filter:.6f}s)"
+            )
             return
 
         self.pulse_count += 1
@@ -108,18 +118,30 @@ class CoinAcceptor:
         self.pulse_active = True
         self.last_interrupt = now
 
+        self.app.log(
+            f"{self.name}: accepted pulse -> pulse_count={self.pulse_count}"
+        )
+
     def _poll_finalize(self):
         now = time.monotonic()
 
         if self.pulse_active and (now - self.last_pulse_time) > self.pulse_timeout:
             pulses = self.pulse_count
 
+            self.app.log(
+                f"{self.name}: pulse train finalized with {pulses} pulse(s) "
+                f"after timeout={self.pulse_timeout:.3f}s"
+            )
+
             coin_value = self.decode_coin(pulses)
 
-            self.app.log(f"{self.name}: pulses={pulses} → value={coin_value}")
+            self.app.log(f"{self.name}: pulses={pulses} -> decoded value={coin_value}")
 
             if coin_value > 0:
+                self.app.log(f"{self.name}: queueing cash amount ₱{coin_value:.2f}")
                 self.app.queue_cash(coin_value)
+            else:
+                self.app.log(f"{self.name}: unknown pulse count {pulses}, rejected")
 
             # reset
             self.pulse_count = 0
@@ -193,8 +215,8 @@ class HardwareManager:
         self.app = app
 
         # Change pins to match your wiring
-        self.bill_acceptor = PulseAcceptor(app, pin=17, name="bill")
-        self.coin_acceptor = PulseAcceptor(app, pin=27, name="coin")
+        self.bill_acceptor = PulseAcceptor(app, pin=24, name="bill")
+        self.coin_acceptor = CoinAcceptor(app, pin=23, name="coin")
 
         # outputs
         self.servo = Servo(18) if Servo else None
