@@ -16,3 +16,11 @@ for row in db.load_addons():
 print("INGREDIENTS")
 for row in db.load_ingredients():
     print(dict(row))
+
+print("PENDING SALES:")
+rows = db.get_pending_sales()
+
+for r in rows:
+    print(dict(r))
+
+print(f"Total pending: {len(rows)}")

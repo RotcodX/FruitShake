@@ -184,3 +184,75 @@ class LocalDB:
             conn.commit()
         finally:
             conn.close()
+
+    def get_pending_sales(self):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT * FROM local_sales
+                WHERE sync_status = 'pending'
+                ORDER BY created_at ASC
+            """)
+            return cur.fetchall()
+        finally:
+            conn.close()
+
+    def get_pending_sales(self):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT * FROM local_sales
+                WHERE sync_status = 'pending'
+                ORDER BY created_at ASC
+            """)
+            return cur.fetchall()
+        finally:
+            conn.close()
+
+    def mark_sale_synced(self, sale_id: str):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE local_sales
+                SET sync_status = 'synced',
+                    synced_at = CURRENT_TIMESTAMP,
+                    last_error = NULL
+                WHERE sale_id = ?
+            """, (sale_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def mark_sale_error(self, sale_id: str, err: str):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE local_sales
+                SET last_error = ?
+                WHERE sale_id = ?
+            """, (err[:500], sale_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def delete_old_synced(self, keep_latest: int = 5):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                DELETE FROM local_sales
+                WHERE local_id NOT IN (
+                    SELECT local_id FROM local_sales
+                    WHERE sync_status = 'synced'
+                    ORDER BY synced_at DESC
+                    LIMIT ?
+                )
+                AND sync_status = 'synced'
+            """, (keep_latest,))
+            conn.commit()
+        finally:
+            conn.close()

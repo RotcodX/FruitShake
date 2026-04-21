@@ -4,6 +4,7 @@ import math
 import uuid
 import os
 import tkinter.font as tkfont
+import threading
 
 from decimal import Decimal, ROUND_HALF_UP
 from PIL import Image, ImageTk
@@ -867,17 +868,45 @@ class PaymentSelectionScreen(tk.Frame):
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
-        cash_rect = self.canvas.create_rectangle(102, 147, 452, 468, outline="")
-        pay_rect = self.canvas.create_rectangle(578, 147, 928, 468, outline="")
-        self.canvas.tag_bind(cash_rect, "<Button-1>", lambda e: self.controller.log("Cash selected") or self.controller.show_frame(CashMethodScreen, timeout_ms=self.controller.default_timeout_ms * 10))
-        self.canvas.tag_bind(pay_rect, "<Button-1>", lambda e: self.controller.log("PayPal selected") or self.controller.show_frame(PaypalMethodScreen, timeout_ms=self.controller.default_timeout_ms * 10))
+        self.cash_rect = self.canvas.create_rectangle(102, 147, 452, 468, outline="")
+        self.pay_rect = self.canvas.create_rectangle(578, 147, 928, 468, outline="")
+        self.canvas.tag_bind(self.cash_rect, "<Button-1>", lambda e: self.controller.log("Cash selected") or self.controller.show_frame(CashMethodScreen, timeout_ms=self.controller.default_timeout_ms * 10))
+        self.canvas.tag_bind(self.pay_rect, "<Button-1>", self._on_paypal_click)
+        self.back_rect = self.canvas.create_rectangle(20, 520, 140, 580, outline="")
+        self.canvas.tag_bind(self.back_rect, "<Button-1>", lambda e: self.controller.log("Back on PaymentSelection") or self.controller.show_frame(SummaryScreen, timeout_ms=self.controller.default_timeout_ms * 5))
 
-        back_rect = self.canvas.create_rectangle(20, 520, 140, 580, outline="")
-        self.canvas.tag_bind(back_rect, "<Button-1>", lambda e: self.controller.log("Back on PaymentSelection") or self.controller.show_frame(SummaryScreen, timeout_ms=self.controller.default_timeout_ms * 5))
-
+        # --- OFFLINE PAYPAL OVERLAY (cropped, fixed position) ---
+        self.offline_paypal_img = load_image_tk("offlinePayPal.png")
+        self.offline_paypal_item = self.canvas.create_image(574, 147, anchor="nw", image=self.offline_paypal_img)
+        # hidden by default
+        self.canvas.itemconfigure(self.offline_paypal_item, state="hidden")
+        # make sure it does NOT handle clicks
+        try:
+            self.canvas.itemconfigure(self.offline_paypal_item, state="disabled")
+        except Exception:
+            pass
+        
         # SummaryBar for this screen
         self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
         self.render_summary()
+
+    def _on_paypal_click(self, event=None):
+        if not self.controller.is_supabase_available():
+            self.controller.log("PayPal blocked: offline mode")
+            return
+
+        self.controller.log("PayPal selected")
+        self.controller.show_frame(
+            PaypalMethodScreen,
+            timeout_ms=self.controller.default_timeout_ms * 10
+        )
+
+    def update_online_state(self):
+        if not self.controller.is_supabase_available():
+            self.canvas.itemconfigure(self.offline_paypal_item, state="normal")
+            self.controller.log("PaymentSelection: OFFLINE - PayPal disabled")
+        else:
+            self.canvas.itemconfigure(self.offline_paypal_item, state="hidden")
 
     def render_summary(self):
         parts = []
@@ -894,6 +923,7 @@ class PaymentSelectionScreen(tk.Frame):
         # refresh summary when screen becomes visible
         try:
             self.render_summary()
+            self.update_online_state()
         except Exception as e:
             self.controller.log(f"PaymentSelectionScreen: tkraise render_summary failed: {e}")
 
@@ -1468,13 +1498,15 @@ class ProcessingScreen(tk.Frame):
 
     def tkraise(self, *args, **kwargs):
         super().tkraise(*args, **kwargs)
-
+        
         # TAKE SNAPSHOT of order BEFORE it may be cleared
         self._fruits_snapshot = list(self.controller.selected_fruits)
         self._addons_snapshot = list(self.controller.selected_addons)
         self.render_summary()
 
         self.controller.log("Processing screen shown — starting progress")
+
+        self.start_process()
 
         # reset progress visuals
         self.progress = 0
@@ -1650,6 +1682,20 @@ class ProcessingScreen(tk.Frame):
         except Exception:
             pass
         self.controller.show_frame(OrderCompleteScreen, timeout_ms=self.controller.default_timeout_ms * 2, skip_error_check=True)
+
+    # Hardware
+    def start_process(self):
+        threading.Thread(target=self._process_worker, daemon=True).start()
+
+    def _process_worker(self):
+        mc = self.controller.machine
+
+        mc.dispense_cup()
+        mc.dispense_fruit(2)
+        mc.add_liquid(3)
+        mc.run_blender(5)
+
+        self.controller.after(0, lambda: self.controller.show_frame(OrderCompleteScreen))
 
 class OrderCompleteScreen(tk.Frame):
     def __init__(self, parent, controller):

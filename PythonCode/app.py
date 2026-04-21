@@ -14,7 +14,9 @@ from supabase import create_client
 from supabase.client import ClientOptions
 from ui_common import SCREEN_W, SCREEN_H, load_gif_frames
 from local_db import LocalDB
-# from hardware import HardwareManager # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
+# Enable for RPI GPIO support, comment out for testing on non-RPI platforms
+""" from hardware import HardwareManager 
+from hardware import MachineController """
 
 from ui_common import (
     money_str,
@@ -73,6 +75,7 @@ class App(tk.Tk):
 
         # Load startup data before building the UI
         self.load_remote_data()
+        self.sync_pending_sales()
 
         # Database Payment tracking
         self.payment_method = None
@@ -147,7 +150,9 @@ class App(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         self.cash_queue = queue.Queue()
-        # self.hardware = HardwareManager(self) # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
+        # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
+        """ self.hardware = HardwareManager(self)
+        self.machine = MachineController() """
         self.after(50, self._poll_cash_queue)
 
         # global input bindings to reset timer
@@ -493,6 +498,46 @@ class App(tk.Tk):
                 }).eq("id", fruit["id"]).execute()
         except Exception as e:
             self.log(f"Failed to sync best-seller flags to Supabase: {e}")
+
+    def sync_pending_sales(self):
+        if not self.is_supabase_available():
+            self.log("Sync skipped: Supabase unavailable.")
+            return
+
+        rows = self.local_db.get_pending_sales()
+
+        if not rows:
+            self.log("No pending sales to sync.")
+            return
+
+        self.log(f"Syncing {len(rows)} pending sales...")
+
+        for r in rows:
+            try:
+                fruits = r["selected_fruits"].split(",") if r["selected_fruits"] else []
+                addons = r["selected_addons"].split(",") if r["selected_addons"] else []
+
+                self.supabase.table("sales").insert({
+                    "sale_id": r["sale_id"],
+                    "total_price": r["total_price"],
+                    "payment_method": r["payment_method"],
+                    "selected_fruits": ", ".join(
+                        self.catalog[k]["name"] for k in fruits if k in self.catalog
+                    ),
+                    "selected_addons": ", ".join(
+                        self.addons[k]["name"] for k in addons if k in self.addons
+                    ) if addons else None,
+                }).execute()
+
+                self.local_db.mark_sale_synced(r["sale_id"])
+                self.log(f"Synced sale: {r['sale_id']}")
+
+            except Exception as e:
+                self.local_db.mark_sale_error(r["sale_id"], str(e))
+                self.log(f"Sync failed for {r['sale_id']}: {e}")
+
+        self.local_db.delete_old_synced(keep_latest=5)
+        self.log("Sync complete.")
 
     def _build_sale_snapshot(self):
         return {

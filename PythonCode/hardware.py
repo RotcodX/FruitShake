@@ -3,6 +3,8 @@ import time
 import threading
 import queue
 from decimal import Decimal, ROUND_HALF_UP
+import RPi.GPIO as GPIO
+import time
 
 try:
     from gpiozero import Button, Servo, OutputDevice
@@ -11,11 +13,6 @@ except ImportError:
 
 
 class PulseAcceptor:
-    """
-    Generic pulse counter for bill/coin acceptors.
-    Assumes: 1 pulse = 1 peso.
-    """
-
     def __init__(
         self,
         app,
@@ -70,6 +67,51 @@ class PulseAcceptor:
 
         self.app.after(50, self._poll_finalize)
 
+class RelayController:
+    def __init__(self, pins):
+        self.pins = pins
+        GPIO.setmode(GPIO.BCM)
+
+        for pin in self.pins:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.HIGH)  # OFF (active LOW)
+
+    def all_on(self):
+        for pin in self.pins:
+            GPIO.output(pin, GPIO.LOW)
+
+    def all_off(self):
+        for pin in self.pins:
+            GPIO.output(pin, GPIO.HIGH)
+
+    def pulse(self, pin, duration):
+        GPIO.output(pin, GPIO.LOW)
+        time.sleep(duration)
+        GPIO.output(pin, GPIO.HIGH)
+
+    def cleanup(self):
+        self.all_off()
+        GPIO.cleanup()
+
+class MachineController:
+    def __init__(self):
+        self.relays = RelayController([17,18,27,22,5,6,25,8])
+
+    def dispense_cup(self):
+        print("Dispensing cup...")
+        time.sleep(1)
+
+    def add_liquid(self, seconds):
+        print(f"Dispensing liquid for {seconds}s...")
+        time.sleep(seconds)
+
+    def dispense_fruit(self, seconds):
+        print(f"Dispensing fruit for {seconds}s...")
+        time.sleep(seconds)
+
+    def run_blender(self, seconds):
+        print(f"Blending for {seconds}s...")
+        time.sleep(seconds)
 
 class HardwareManager:
     def __init__(self, app):

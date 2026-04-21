@@ -20,7 +20,7 @@ def safe_delete(canvas, item):
 
 def load_image_tk(name, resize_to=None):
     path = os.path.join(ASSETS_DIR, name)
-    img = Image.open(path)
+    img = Image.open(path).convert("RGBA")  # <-- ADD THIS
     if resize_to:
         img = img.resize(resize_to, Image.LANCZOS)
     return ImageTk.PhotoImage(img)
