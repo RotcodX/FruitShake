@@ -2,6 +2,9 @@
 .tmp.driveupload/
 .tmp.drivedownload/
 
+# Database
+*.db
+
 # Python cache
 __pycache__/
 *.pyc

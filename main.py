@@ -6,10 +6,13 @@ if __name__ == "__main__":
     
 #region Notes
 """
+On Laptop:
+git add .
+git commit -m "update"
+git push
 
-- Edit the `.env` file's URL to *simulate* being offline. 
-- Find "# Enable for RPI GPIO support, comment out for testing on non-RPI platforms" and enable when transferring to RPi (Shift + Alt + A).
-- Rename "env.env" or "1.env" to ".env" for Supabase.
-
+To RPi:
+cd ~/FruitShake
+git pull
 """
 #endregion
