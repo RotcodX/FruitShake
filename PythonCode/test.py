@@ -3,7 +3,7 @@ from local_db import LocalDB
 
 db = LocalDB()
 print("Local database initialized successfully.")
-print("DB file created.")
+print("DB file accessed")
 
 print("FRUITS")
 for row in db.load_fruits():

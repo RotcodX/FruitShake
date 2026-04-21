@@ -11,7 +11,6 @@ try:
 except ImportError:
     Button = Servo = OutputDevice = None
 
-
 class PulseAcceptor:
     def __init__(
         self,
@@ -66,6 +65,82 @@ class PulseAcceptor:
                 self.app.log(f"{self.name}: ignored noise ({pulses} pulses)")
 
         self.app.after(50, self._poll_finalize)
+
+class CoinAcceptor:
+    def __init__(
+        self,
+        app,
+        pin,
+        name="coin",
+        pulse_timeout=0.5,   # 500 ms
+        noise_filter=0.025   # 25 ms
+    ):
+        self.app = app
+        self.pin = pin
+        self.name = name
+
+        self.pulse_timeout = pulse_timeout
+        self.noise_filter = noise_filter
+
+        self.pulse_count = 0
+        self.last_pulse_time = 0.0
+        self.last_interrupt = 0.0
+        self.pulse_active = False
+
+        # GPIO setup
+        GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+        # interrupt equivalent
+        GPIO.add_event_detect(pin, GPIO.FALLING, callback=self._on_pulse, bouncetime=1)
+
+        # polling loop (like Arduino loop)
+        self.app.after(50, self._poll_finalize)
+
+    def _on_pulse(self, channel):
+        now = time.monotonic()
+
+        # noise filter (same as Arduino)
+        if (now - self.last_interrupt) < self.noise_filter:
+            return
+
+        self.pulse_count += 1
+        self.last_pulse_time = now
+        self.pulse_active = True
+        self.last_interrupt = now
+
+    def _poll_finalize(self):
+        now = time.monotonic()
+
+        if self.pulse_active and (now - self.last_pulse_time) > self.pulse_timeout:
+            pulses = self.pulse_count
+
+            coin_value = self.decode_coin(pulses)
+
+            self.app.log(f"{self.name}: pulses={pulses} → value={coin_value}")
+
+            if coin_value > 0:
+                self.app.queue_cash(coin_value)
+
+            # reset
+            self.pulse_count = 0
+            self.pulse_active = False
+
+        self.app.after(50, self._poll_finalize)
+
+    def decode_coin(self, pulses):
+        # 1 peso
+        if 1 <= pulses <= 2:
+            return 1
+
+        # 5 peso
+        if 3 <= pulses <= 6:
+            return 5
+
+        # 10 peso
+        if 7 <= pulses <= 12:
+            return 10
+
+        return 0
 
 class RelayController:
     def __init__(self, pins):
