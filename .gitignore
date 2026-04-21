@@ -1,0 +1,7 @@
+# Google Drive temp files
+.tmp.driveupload/
+.tmp.drivedownload/
+
+# Python cache
+__pycache__/
+*.pyc
