@@ -15,8 +15,8 @@ from supabase.client import ClientOptions
 from ui_common import SCREEN_W, SCREEN_H, load_gif_frames
 from local_db import LocalDB
 # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
-""" from hardware import HardwareManager 
-from hardware import MachineController """
+from hardware import HardwareManager 
+from hardware import MachineController
 
 from ui_common import (
     money_str,
@@ -151,8 +151,8 @@ class App(tk.Tk):
 
         self.cash_queue = queue.Queue()
         # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
-        """ self.hardware = HardwareManager(self)
-        self.machine = MachineController() """
+        self.hardware = HardwareManager(self)
+        self.machine = MachineController()
         self.after(50, self._poll_cash_queue)
 
         # global input bindings to reset timer
