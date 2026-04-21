@@ -1481,6 +1481,10 @@ class ProcessingScreen(tk.Frame):
         # finish wait time (seconds) before moving to next screen
         self.finish_wait_s = 1.5
 
+        self.machine_job_running = False
+        self.machine_job_done = False
+        self.machine_job_error = None
+
     def _get_delay_for_pct(self, pct):
         for lo, hi, delay in self.segment_delays:
             if lo <= pct <= hi:
@@ -1527,6 +1531,14 @@ class ProcessingScreen(tk.Frame):
         # (re)start handle sway if we have a handle
         if self.handle_id and not self.handle_sway_job:
             self._animate_handle()
+
+        # reset machine run state
+        self.machine_job_running = False
+        self.machine_job_done = False
+        self.machine_job_error = None
+
+        # start machine worker once screen is shown
+        self._start_machine_worker()
 
         # start ticking
         self._tick_progress()
@@ -1664,6 +1676,10 @@ class ProcessingScreen(tk.Frame):
         _loop()
 
     def _finish(self):
+        if not self.machine_job_done:
+            self.controller.log("Processing: waiting for machine worker before finishing")
+            self.progress_job = self.after(200, self._finish)
+            return
         if self.progress_job:
             try:
                 self.after_cancel(self.progress_job)
@@ -1697,6 +1713,62 @@ class ProcessingScreen(tk.Frame):
         mc.run_blender(5)
 
         self.controller.after(0, lambda: self.controller.show_frame(OrderCompleteScreen))
+
+    def _start_machine_worker(self):
+        if self.machine_job_running:
+            return
+
+        self.machine_job_running = True
+        self.controller.log("Processing: starting machine worker")
+
+        threading.Thread(
+            target=self._machine_worker,
+            daemon=True
+        ).start()
+
+    def _machine_worker(self):
+        try:
+            machine = getattr(self.controller, "machine", None)
+            if machine is None:
+                self.controller.log("Processing: no machine controller available, skipping hardware run")
+                self.controller.after(0, self._mark_machine_done)
+                return
+
+            fruits = list(getattr(self, "_fruits_snapshot", []))
+            addons = list(getattr(self, "_addons_snapshot", []))
+
+            self.controller.log(
+                f"Processing: hardware run starting for fruits={fruits}, addons={addons}"
+            )
+
+            # Example sequence — adjust timings later
+            machine.dispense_cup()
+
+            # simple placeholder fruit dispense time based on number of fruits
+            if fruits:
+                machine.dispense_fruit(max(1, len(fruits)))
+
+            # simple placeholder liquid time
+            machine.add_liquid(2)
+
+            # blender
+            machine.run_blender(5)
+
+            self.controller.after(0, self._mark_machine_done)
+
+        except Exception as e:
+            self.controller.after(0, lambda err=e: self._mark_machine_error(err))
+
+    def _mark_machine_done(self):
+        self.machine_job_running = False
+        self.machine_job_done = True
+        self.controller.log("Processing: machine worker finished")
+
+    def _mark_machine_error(self, err):
+        self.machine_job_running = False
+        self.machine_job_done = True
+        self.machine_job_error = err
+        self.controller.log(f"Processing: machine worker failed: {err}")
 
 class OrderCompleteScreen(tk.Frame):
     def __init__(self, parent, controller):
