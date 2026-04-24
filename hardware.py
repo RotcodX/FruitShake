@@ -13,189 +13,107 @@ try:
 except ImportError:
     Button = Servo = OutputDevice = None
 
-class PulseAcceptor:
+class MoneyPulseAcceptor:
     def __init__(
         self,
         app,
         pin,
-        name="acceptor",
-        startup_delay=2.0,
-        pulse_timeout=0.3,
-        min_valid_pulses=20,
-        debounce=0.01,
+        name,
+        timeout,
+        debounce,
+        bouncetime,
+        decoder,
+        accept_one_pulse=False,
     ):
         self.app = app
         self.pin = pin
         self.name = name
-        self.startup_delay = startup_delay
-        self.pulse_timeout = pulse_timeout
-        self.min_valid_pulses = min_valid_pulses
-
-        self.start_time = time.monotonic()
-        self.pulse_count = 0
-        self.last_pulse_time = 0.0
-
-        self.input = Button(pin, pull_up=True, bounce_time=debounce)
-        self.input.when_pressed = self._on_pulse
-
-        # poll finalization from Tk thread
-        self.app.after(50, self._poll_finalize)
-
-    def _on_pulse(self):
-        now = time.monotonic()
-
-        # ignore startup noise
-        if now - self.start_time < self.startup_delay:
-            return
-
-        self.pulse_count += 1
-        self.last_pulse_time = now
-
-    def _poll_finalize(self):
-        now = time.monotonic()
-
-        # pulse train ended
-        if self.pulse_count > 0 and (now - self.last_pulse_time) > self.pulse_timeout:
-            pulses = self.pulse_count
-            self.pulse_count = 0
-
-            if pulses >= self.min_valid_pulses:
-                amount = float(pulses)  # 1 pulse = 1 peso
-                self.app.log(f"{self.name}: valid pulse train = {pulses} pulses -> ₱{amount:.2f}")
-                self.app.queue_cash(amount)
-            else:
-                self.app.log(f"{self.name}: ignored noise ({pulses} pulses)")
-
-        self.app.after(50, self._poll_finalize)
-
-class CoinAcceptor:
-    def __init__(
-        self,
-        app,
-        pin,
-        name="coin",
-        pulse_timeout=0.7,   # 500 ms
-        noise_filter=0.03   # 3 ms
-    ):
-        self.app = app
-        self.pin = pin
-        self.name = name
-        self.app.log(f"{self.name}: initializing on GPIO {pin}")
-
-        self.pulse_timeout = pulse_timeout
-        self.noise_filter = noise_filter
+        self.timeout = timeout
+        self.debounce = debounce
+        self.decoder = decoder
+        self.accept_one_pulse = accept_one_pulse
 
         self.pulse_count = 0
         self.last_pulse_time = 0.0
-        self.last_interrupt = 0.0
         self.pulse_active = False
 
-        # GPIO setup
+        self.app.log(f"{self.name}: initializing on GPIO {pin}")
+
         GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        # clear any old edge detection on this pin first
+
         try:
             GPIO.remove_event_detect(pin)
         except Exception:
             pass
-        # interrupt equivalent
+
         try:
-            GPIO.add_event_detect(pin, GPIO.FALLING, callback=self._on_pulse, bouncetime=1)
+            GPIO.add_event_detect(
+                pin,
+                GPIO.FALLING,
+                callback=self._on_pulse,
+                bouncetime=bouncetime
+            )
             self.app.log(f"{self.name}: edge detection enabled on GPIO {pin}")
         except Exception as e:
             self.app.log(f"{self.name}: failed to enable edge detection on GPIO {pin}: {e}")
             raise
 
-        # polling loop (like Arduino loop)
         self.app.after(50, self._poll_finalize)
 
     def _on_pulse(self, channel):
         now = time.monotonic()
-        dt = now - self.last_interrupt if self.last_interrupt else 0.0
 
-        self.app.log(
-            f"{self.name}: raw pulse detected on GPIO {self.pin} "
-            f"(dt={dt:.6f}s, count_before={self.pulse_count})"
-        )
-
-        # noise filter (same as Arduino)
-        if (now - self.last_interrupt) < self.noise_filter:
-            self.app.log(
-                f"{self.name}: pulse ignored by noise_filter "
-                f"(dt={now - self.last_interrupt:.6f}s < {self.noise_filter:.6f}s)"
-            )
+        if self.last_pulse_time and (now - self.last_pulse_time) < self.debounce:
             return
-        
-        # If too much time passed, start a new pulse train
-        if self.pulse_active and (now - self.last_pulse_time) > 0.15:
-            self.app.log(f"{self.name}: new pulse train started (gap detected)")
-            self.pulse_count = 0
 
         self.pulse_count += 1
         self.last_pulse_time = now
         self.pulse_active = True
-        self.last_interrupt = now
 
-        self.app.log(
-            f"{self.name}: accepted pulse -> pulse_count={self.pulse_count}"
-        )
+        self.app.log(f"{self.name}: accepted pulse -> pulse_count={self.pulse_count}")
 
     def _poll_finalize(self):
         now = time.monotonic()
 
-        if self.pulse_active and (now - self.last_pulse_time) > self.pulse_timeout:
+        if self.pulse_active and (now - self.last_pulse_time) > self.timeout:
             pulses = self.pulse_count
+            value = self.decoder(pulses)
 
-            self.app.log(
-                f"{self.name}: pulse train finalized with {pulses} pulse(s) "
-                f"after timeout={self.pulse_timeout:.3f}s"
-            )
-            """ 
-            # Reject too short / empty pulse trains
-            if pulses == 0:
-                self.app.log(f"{self.name}: ignored empty ({pulses} pulse)")
-                self.pulse_count = 0
-                self.pulse_active = False
-                return
-            # Reject too long / unstable pulse trains
-            if pulses > 13:
-                self.app.log(f"{self.name}: rejected unstable pulse train ({pulses} pulses)")
-                
-                self.pulse_count = 0
-                self.pulse_active = False
-                return
-             """
-            coin_value = self.decode_coin(pulses)
+            self.app.log(f"{self.name}: finalized {pulses} pulse(s) -> ₱{value}")
 
-            self.app.log(f"{self.name}: pulses={pulses} -> decoded value={coin_value}")
-
-            if coin_value > 0:
-                if pulses >= 2:
-                    self.app.log(f"{self.name}: queueing cash amount ₱{coin_value:.2f}")
-                    self.app.queue_cash(coin_value)
+            if value > 0:
+                if pulses == 1 and not self.accept_one_pulse:
+                    self.app.log(f"{self.name}: rejected 1-pulse value for stability")
+                else:
+                    self.app.log(f"{self.name}: queueing cash amount ₱{value:.2f}")
+                    self.app.queue_cash(value)
             else:
-                self.app.log(f"{self.name}: unknown pulse count {pulses}, rejected")
+                self.app.log(f"{self.name}: invalid pulse count {pulses}, ignored")
 
-            # reset
             self.pulse_count = 0
+            self.last_pulse_time = 0.0
             self.pulse_active = False
-            self.last_pulse_time = 0
 
         self.app.after(50, self._poll_finalize)
 
-    def decode_coin(self, pulses):
-        # 1 peso
-        if 1 <= pulses <= 3:
-            return 1
+def decode_coin(pulses):
+    if 1 <= pulses <= 3:
+        return 1
+    if 4 <= pulses <= 7:
+        return 5
+    if 8 <= pulses <= 13:
+        return 10
+    return 0
 
-        # 5 peso
-        if 3 <= pulses <= 6:
-            return 5
 
-        # 10 peso
-        if 7 <= pulses <= 12:
-            return 10
-
-        return 0
+def decode_bill(pulses):
+    if 18 <= pulses <= 30:
+        return 20
+    if 45 <= pulses <= 70:
+        return 50
+    if 90 <= pulses <= 130:
+        return 100
+    return 0
 
 class RelayController:
     def __init__(self, pins):
@@ -250,9 +168,27 @@ class HardwareManager:
     def __init__(self, app):
         self.app = app
 
-        # Change pins to match your wiring
-        self.coin_acceptor = CoinAcceptor(app, pin=17, name="coin")
-        # self.bill_acceptor = PulseAcceptor(app, pin=24, name="bill")
+        self.coin_acceptor = MoneyPulseAcceptor(
+            app,
+            pin=17,
+            name="coin",
+            timeout=0.7,
+            debounce=0.03,
+            bouncetime=2,
+            decoder=decode_coin,
+            accept_one_pulse=False,  # set True later if ₱1 becomes stable
+        )
+
+        self.bill_acceptor = MoneyPulseAcceptor(
+            app,
+            pin=24,
+            name="bill",
+            timeout=1.0,
+            debounce=0.08,
+            bouncetime=15,
+            decoder=decode_bill,
+            accept_one_pulse=False,
+        )
 
         # outputs
         self.servo = None

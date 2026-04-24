@@ -251,6 +251,7 @@ class App(tk.Tk):
         self.log(f"Loaded addons count: {len(self.addons)}")
         self.log(f"Loaded ingredients count: {len(self.ingredients)}")
         self.log("=== Finished loading remote inventory ===")
+        #region Part where Supabase edits local database, simply remove if and when machine can check stock
         try:
             self.local_db.replace_fruits(self.catalog)
             self.local_db.replace_addons(self.addons)
@@ -258,6 +259,7 @@ class App(tk.Tk):
             self.log("Local SQLite inventory snapshot updated.")
         except Exception as e:
             self.log(f"Failed to save startup data to local SQLite: {e}")
+        #endregion
 
     # -------------------------
     # logging / debug helpers
@@ -550,7 +552,54 @@ class App(tk.Tk):
                 self.log(f"Sync failed for {r['sale_id']}: {e}")
 
         self.local_db.delete_old_synced(keep_latest=5)
+
+        # After pending sales are uploaded, push the latest local inventory state.
+        self.sync_inventory_to_supabase()
+
         self.log("Sync complete.")
+
+    def sync_inventory_to_supabase(self):
+        """
+        Push the current local/in-memory inventory state to Supabase.
+
+        Runtime direction:
+            Local machine state -> Supabase
+
+        This should NOT pull stock from Supabase.
+        """
+        if not self.is_supabase_available():
+            self.log("Inventory sync skipped: Supabase unavailable.")
+            return False
+
+        try:
+            # Fruits: stock, sales, best_seller
+            for key, fruit in self.catalog.items():
+                self.supabase.table("fruits").update({
+                    "stock": fruit["stock"],
+                    "sales": fruit["sales"],
+                    "best_seller": fruit.get("best_seller", False),
+                }).eq("id", fruit["id"]).execute()
+
+            # Add-ons: stock, sales
+            for key, addon in self.addons.items():
+                self.supabase.table("addons").update({
+                    "stock": addon["stock"],
+                    "sales": addon["sales"],
+                }).eq("id", addon["id"]).execute()
+
+            # Ingredients: stock only
+            # Price still comes from startup Supabase pull.
+            for key, ingredient in self.ingredients.items():
+                self.supabase.table("ingredients").update({
+                    "stock": ingredient["stock"],
+                }).eq("id", ingredient["id"]).execute()
+
+            self.log("Inventory stock/sales synced to Supabase.")
+            return True
+
+        except Exception as e:
+            self.log(f"Inventory sync to Supabase failed: {e}")
+            return False
 
     def _build_sale_snapshot(self):
         return {
@@ -644,6 +693,10 @@ class App(tk.Tk):
                 }).execute()
 
                 self.log("Sale synced to Supabase as online sale.")
+
+                # Push updated local stock/sales totals to Supabase
+                self.sync_inventory_to_supabase()
+
                 self.local_db.mark_sale_synced(sale_row["sale_id"])
                 self.local_db.delete_old_synced(keep_latest=5)
 

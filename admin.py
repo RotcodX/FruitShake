@@ -77,7 +77,7 @@ class AdminPanel(tk.Frame):
             self._recheck_btn.place(x=0, y=self.panel_height - 10, anchor="sw") 
             # Disabled for now since wala pang machine stock checker
             self._check_machine_btn = tk.Button(self, text="Check Machine Stock (test)", command=self._on_check_machine_stock)
-            self._check_machine_btn.place(x=90, y=self.panel_height - 10, anchor="sw")
+            self._check_machine_btn.place(x=110, y=self.panel_height - 10, anchor="sw")
         else:
             self._recheck_btn = None
             self._check_machine_btn = None
