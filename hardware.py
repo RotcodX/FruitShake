@@ -68,7 +68,7 @@ class MoneyPulseAcceptor:
             self.app.log(f"{self.name}: failed to enable edge detection on GPIO {pin}: {e}")
             raise
 
-        self.app.after(10, self._poll_finalize)
+        self.app.after(100, self._poll_finalize)
 
     def _on_pulse(self, channel):
         now = time.monotonic()
