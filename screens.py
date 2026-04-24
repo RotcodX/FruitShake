@@ -1594,7 +1594,7 @@ class ProcessingScreen(tk.Frame):
                 new_left = self.bar_x1 + int(reveal_ratio * (bar_w))
                 self.canvas.coords(self.cover, new_left, self.bar_y1, self.bar_x2, self.bar_y2)
 
-        # update labels
+        # ProcessingScreen labels and processes. Updates description based on current percentage.
         if pct <= 15:
             desc = "Dispensing Fruit..."
         elif pct <= 30:

@@ -196,10 +196,10 @@ class AdminPanel(tk.Frame):
             controls = tk.Frame(row, bg="#222")
             controls.pack(side="left", padx=4)
 
-            tk.Button(controls, text="-Stock", command=lambda k=key: self._change_fruit_stock(k, -1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="+Stock", command=lambda k=key: self._change_fruit_stock(k, +1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_fruit_sales(k, -1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="+Sales", command=lambda k=key: self._change_fruit_sales(k, +1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._change_fruit_stock(k, -1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._change_fruit_stock(k, +1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_fruit_sales(k, -1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="+Sales", command=lambda k=key: self._change_fruit_sales(k, +1), width=8).pack(side="left", padx=1)
 
         # Add-ons
         sep = tk.Label(parent, text="Add-Ons", bg="#222", fg="#fff", anchor="w")
@@ -220,10 +220,10 @@ class AdminPanel(tk.Frame):
             controls = tk.Frame(row, bg="#222")
             controls.pack(side="left", padx=4)
 
-            tk.Button(controls, text="-Stock", command=lambda k=key: self._change_addon_stock(k, -1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="+Stock", command=lambda k=key: self._change_addon_stock(k, +1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_addon_sales(k, -1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="+Sales", command=lambda k=key: self._change_addon_sales(k, +1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._change_addon_stock(k, -1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._change_addon_stock(k, +1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_addon_sales(k, -1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="+Sales", command=lambda k=key: self._change_addon_sales(k, +1), width=8).pack(side="left", padx=1)
 
         # Ingredients
         sep2 = tk.Label(parent, text="Ingredients (stock only)", bg="#222", fg="#fff", anchor="w")
@@ -241,8 +241,8 @@ class AdminPanel(tk.Frame):
             controls = tk.Frame(row, bg="#222")
             controls.pack(side="left", padx=4)
 
-            tk.Button(controls, text="-Stock", command=lambda k=key: self._change_ingredient_stock(k, -1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="+Stock", command=lambda k=key: self._change_ingredient_stock(k, +1), width=8).pack(side="left", padx=2)
+            tk.Button(controls, text="-Stock", command=lambda k=key: self._change_ingredient_stock(k, -1), width=8).pack(side="left", padx=1)
+            tk.Button(controls, text="+Stock", command=lambda k=key: self._change_ingredient_stock(k, +1), width=8).pack(side="left", padx=1)
 
         # Income
         income_row = tk.Frame(parent, bg="#222")
