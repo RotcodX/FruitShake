@@ -24,7 +24,7 @@ class MoneyPulseAcceptor:
         bouncetime,
         decoder,
         accept_one_pulse=False,
-        debug_cooldown=0.25,
+        debug_cooldown=0.5,
     ):
         self.app = app
         self.pin = pin
@@ -40,6 +40,7 @@ class MoneyPulseAcceptor:
         self.last_pulse_time = 0.0
         self.pulse_active = False
         self.last_debug_log = 0.0
+        self.first_pulse_time = 0
 
         self.lock = threading.Lock()
 
@@ -73,36 +74,27 @@ class MoneyPulseAcceptor:
         now = time.monotonic()
 
         with self.lock:
+            # debounce
             if self.last_pulse_time and (now - self.last_pulse_time) < self.debounce:
                 return
 
-            self.pulse_count += 1
-            self.last_pulse_time = now
-            self.pulse_active = True
-
-            if self.pulse_count == 1:
-                self.app.log(f"{self.name}: signal detected")
-
-            # Controlled debug: no terminal spam
-            if now - self.last_debug_log >= self.debug_cooldown:
-                self.app.log(f"{self.name}: reading pulses... ({self.pulse_count})")
-                self.last_debug_log = now
-
-        with self.lock:
-            if self.last_pulse_time and (now - self.last_pulse_time) < self.debounce:
-                return
-
-            # initialize first pulse time
+            # initialize first pulse
             if self.pulse_count == 0:
                 self.first_pulse_time = now
+                self.app.log(f"{self.name}: signal detected")
 
-            # hard cap to prevent infinite growth
+            # hard cap (prevents runaway)
             if self.pulse_count > 120:
                 return
 
             self.pulse_count += 1
             self.last_pulse_time = now
             self.pulse_active = True
+
+            # controlled debug
+            if now - self.last_debug_log >= self.debug_cooldown:
+                self.app.log(f"{self.name}: reading pulses... ({self.pulse_count})")
+                self.last_debug_log = now
 
     def _poll_finalize(self):
         now = time.monotonic()
@@ -125,6 +117,9 @@ class MoneyPulseAcceptor:
         if pulses >= 60:
             self.app.log(f"{self.name}: force finalize ({pulses} pulses)")
             should_finalize = True
+        if first_time and (now - first_time) > 1.2:
+            self.app.log(f"{self.name}: forced by max window")
+            should_finalize = True
 
         # ── STEP 4: force finalize if time window exceeded
         MAX_WINDOW = 1.2
@@ -134,7 +129,7 @@ class MoneyPulseAcceptor:
 
         # ── STEP 5: if not ready, reschedule and exit
         if not should_finalize:
-            self.app.after(10, self._poll_finalize)
+            self.app.after(100, self._poll_finalize)
             return
 
         # ── STEP 6: reset values safely

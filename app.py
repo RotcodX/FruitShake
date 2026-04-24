@@ -917,7 +917,7 @@ class App(tk.Tk):
         return False
     
     def queue_cash(self, amount):
-        if amount <= 0:
+        if amount <= 0 or not self.accept_cash_input:
             return
 
         # Ignore hardware money pulses unless cash input is explicitly enabled.
@@ -931,7 +931,7 @@ class App(tk.Tk):
             return
 
         # Ignore unrealistic spikes.
-        if amount > 120:
+        if amount > 150:
             self.log(f"Rejected suspicious cash amount: {amount}")
             return
 
