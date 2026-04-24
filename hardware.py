@@ -204,11 +204,11 @@ class RelayController:
 
 class MachineController:
     def __init__(self):
-        self.relays = RelayController([17, 18, 27, 22, 5, 6, 25, 8])
+        self.relays = RelayController([23, 18, 27, 22, 5, 6, 25, 8])
 
     def dispense_cup(self, seconds):
         print("Dispensing cup.")
-        self.relays.pulse(17, seconds)
+        self.relays.pulse(23, seconds)
 
     def add_liquid(self, seconds):
         print(f"Dispensing liquid for {seconds}s.")
@@ -230,11 +230,11 @@ class HardwareManager:
         self.app = app
 
         # Change pins to match your wiring
-        self.coin_acceptor = CoinAcceptor(app, pin=23, name="coin")
+        self.coin_acceptor = CoinAcceptor(app, pin=17, name="coin")
         # self.bill_acceptor = PulseAcceptor(app, pin=24, name="bill")
 
         # outputs
-        self.servo = Servo(18) if Servo else None
+        self.servo = None
         # self.blender = OutputDevice(23, initial_value=False) if OutputDevice else None # Enable this again when blender gpio is changed
 
     def open_gate(self):
