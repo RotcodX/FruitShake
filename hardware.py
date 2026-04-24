@@ -74,8 +74,8 @@ class CoinAcceptor:
         app,
         pin,
         name="coin",
-        pulse_timeout=0.5,   # 500 ms
-        noise_filter=0.025   # 25 ms
+        pulse_timeout=0.7,   # 500 ms
+        noise_filter=0.05   # 25 ms
     ):
         self.app = app
         self.pin = pin
@@ -145,13 +145,20 @@ class CoinAcceptor:
                 f"after timeout={self.pulse_timeout:.3f}s"
             )
 
+            if pulses < 2:
+                self.app.log(f"{self.name}: ignored noise ({pulses} pulse)")
+                self.pulse_count = 0
+                self.pulse_active = False
+                return
+            
             coin_value = self.decode_coin(pulses)
 
             self.app.log(f"{self.name}: pulses={pulses} -> decoded value={coin_value}")
 
             if coin_value > 0:
-                self.app.log(f"{self.name}: queueing cash amount ₱{coin_value:.2f}")
-                self.app.queue_cash(coin_value)
+                if pulses >= 2:
+                    self.app.log(f"{self.name}: queueing cash amount ₱{coin_value:.2f}")
+                    self.app.queue_cash(coin_value)
             else:
                 self.app.log(f"{self.name}: unknown pulse count {pulses}, rejected")
 
