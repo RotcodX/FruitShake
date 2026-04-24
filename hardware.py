@@ -187,7 +187,7 @@ class HardwareManager:
             name="coin",
             timeout=0.7,
             debounce=0.03,
-            bouncetime=2,
+            bouncetime=30,
             decoder=decode_coin,
             accept_one_pulse=False,  # set True later if ₱1 becomes stable
         )
@@ -198,7 +198,7 @@ class HardwareManager:
             name="bill",
             timeout=1.0,
             debounce=0.08,
-            bouncetime=15,
+            bouncetime=30,
             decoder=decode_bill,
             accept_one_pulse=False,
         )
