@@ -783,7 +783,7 @@ class App(tk.Tk):
 
         fruit_total = sum(self.catalog[k]["price"] for k in fruits)
         addon_total = sum(self.addons[k]["price"] for k in addons)
-        base_total = 50
+        base_total = 5
 
         fruit_count = len(fruits)
 
@@ -830,7 +830,14 @@ class App(tk.Tk):
         return False
     
     def queue_cash(self, amount):
-        self.log(f"queue_cash: received amount ₱{float(amount):.2f}")
+        if amount <= 0:
+            return
+
+        # NEW: ignore unrealistic spikes
+        if amount > 20:   # adjust if needed
+            self.log(f"Rejected suspicious cash amount: {amount}")
+            return
+
         self.cash_queue.put(amount)
 
     def _poll_cash_queue(self):

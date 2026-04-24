@@ -124,6 +124,11 @@ class CoinAcceptor:
                 f"(dt={now - self.last_interrupt:.6f}s < {self.noise_filter:.6f}s)"
             )
             return
+        
+        # If too much time passed, start a new pulse train
+        if self.pulse_active and (now - self.last_pulse_time) > 0.15:
+            self.app.log(f"{self.name}: new pulse train started (gap detected)")
+            self.pulse_count = 0
 
         self.pulse_count += 1
         self.last_pulse_time = now
@@ -145,8 +150,16 @@ class CoinAcceptor:
                 f"after timeout={self.pulse_timeout:.3f}s"
             )
 
-            if pulses < 2:
-                self.app.log(f"{self.name}: ignored noise ({pulses} pulse)")
+            # Reject too short / empty pulse trains
+            if pulses == 0:
+                self.app.log(f"{self.name}: ignored empty ({pulses} pulse)")
+                self.pulse_count = 0
+                self.pulse_active = False
+                return
+            # Reject too long / unstable pulse trains
+            if pulses > 13:
+                self.app.log(f"{self.name}: rejected unstable pulse train ({pulses} pulses)")
+                
                 self.pulse_count = 0
                 self.pulse_active = False
                 return
@@ -165,12 +178,13 @@ class CoinAcceptor:
             # reset
             self.pulse_count = 0
             self.pulse_active = False
+            self.last_pulse_time = 0
 
         self.app.after(50, self._poll_finalize)
 
     def decode_coin(self, pulses):
         # 1 peso
-        if 1 <= pulses <= 2:
+        if pulses == 1:
             return 1
 
         # 5 peso
