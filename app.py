@@ -917,7 +917,7 @@ class App(tk.Tk):
         return False
     
     def queue_cash(self, amount):
-        if amount <= 0 or not self.accept_cash_input:
+        if amount <= 0:
             return
 
         # Ignore hardware money pulses unless cash input is explicitly enabled.
@@ -935,6 +935,7 @@ class App(tk.Tk):
             self.log(f"Rejected suspicious cash amount: {amount}")
             return
 
+        self.log(f"queue_cash accepted ₱{float(amount):.2f}")
         self.cash_queue.put(amount)
 
     def _poll_cash_queue(self):
