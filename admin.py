@@ -77,7 +77,7 @@ class AdminPanel(tk.Frame):
             self._recheck_btn.place(x=0, y=self.panel_height - 10, anchor="sw") 
             # Disabled for now since wala pang machine stock checker
             self._check_machine_btn = tk.Button(self, text="Check Machine Stock (test)", command=self._on_check_machine_stock)
-            self._check_machine_btn.place(x=240, y=self.panel_height - 10, anchor="sw")
+            self._check_machine_btn.place(x=90, y=self.panel_height - 10, anchor="sw")
         else:
             self._recheck_btn = None
             self._check_machine_btn = None
@@ -198,7 +198,7 @@ class AdminPanel(tk.Frame):
 
             tk.Button(controls, text="-Stock", command=lambda k=key: self._change_fruit_stock(k, -1), width=8).pack(side="left", padx=2)
             tk.Button(controls, text="+Stock", command=lambda k=key: self._change_fruit_stock(k, +1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_fruit_sales(k, -1), width=8).pack(side="left", padx=6)
+            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_fruit_sales(k, -1), width=8).pack(side="left", padx=2)
             tk.Button(controls, text="+Sales", command=lambda k=key: self._change_fruit_sales(k, +1), width=8).pack(side="left", padx=2)
 
         # Add-ons
@@ -222,7 +222,7 @@ class AdminPanel(tk.Frame):
 
             tk.Button(controls, text="-Stock", command=lambda k=key: self._change_addon_stock(k, -1), width=8).pack(side="left", padx=2)
             tk.Button(controls, text="+Stock", command=lambda k=key: self._change_addon_stock(k, +1), width=8).pack(side="left", padx=2)
-            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_addon_sales(k, -1), width=8).pack(side="left", padx=6)
+            tk.Button(controls, text="-Sales", command=lambda k=key: self._change_addon_sales(k, -1), width=8).pack(side="left", padx=2)
             tk.Button(controls, text="+Sales", command=lambda k=key: self._change_addon_sales(k, +1), width=8).pack(side="left", padx=2)
 
         # Ingredients

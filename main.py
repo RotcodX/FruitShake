@@ -7,7 +7,7 @@ if __name__ == "__main__":
 #region Notes
 """
 On Laptop:
-git add .
+git add . / or just click stage all changes
 git commit -m "update"
 git push
 
@@ -16,7 +16,7 @@ cd ~/FruitShake
 git pull
 
 Virtual Environment:
-Previously: Shift + Alt + P -> Select Interpreter -> Enter interpreter path ->Select the venv manually from folders
+Previously: Shift + Alt + P -> Select Interpreter -> Enter interpreter path -> Select the venv manually from folders
 Try: source ~/venv-rpi/bin/activate
 """
 #endregion
