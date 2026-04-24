@@ -68,6 +68,10 @@ class MoneyPulseAcceptor:
     def _on_pulse(self, channel):
         now = time.monotonic()
 
+        # If too much time passed → treat as new signal
+        if self.pulse_active and (now - self.last_pulse_time) > 0.2:
+            self.pulse_count = 0
+
         with self.lock:
             if self.last_pulse_time and (now - self.last_pulse_time) < self.debounce:
                 return
@@ -78,6 +82,8 @@ class MoneyPulseAcceptor:
 
     def _poll_finalize(self):
         now = time.monotonic()
+        if hasattr(self, "cooldown_until") and time.monotonic() < self.cooldown_until:
+            return
 
         with self.lock:
             should_finalize = (
@@ -95,7 +101,12 @@ class MoneyPulseAcceptor:
             self.pulse_count = 0
             self.last_pulse_time = 0.0
             self.pulse_active = False
-
+        """ 
+        # Reject weird tiny pulse trains (noise bursts)
+        if pulses < 2:
+            self.app.log(f"{self.name}: ignored noise ({pulses} pulse)")
+            return
+        """
         value = self.decoder(pulses)
 
         if value > 0:
@@ -108,6 +119,7 @@ class MoneyPulseAcceptor:
             self.app.log(f"{self.name}: invalid pulse count {pulses}, ignored")
 
         self.app.after(10, self._poll_finalize)
+        self.cooldown_until = time.monotonic() + 1.0
 
 def decode_coin(pulses):
     if 1 <= pulses <= 3:
@@ -186,8 +198,8 @@ class HardwareManager:
             pin=17,
             name="coin",
             timeout=0.7,
-            debounce=0.03,
-            bouncetime=30,
+            debounce=0.06,
+            bouncetime=50,
             decoder=decode_coin,
             accept_one_pulse=False,  # set True later if ₱1 becomes stable
         )
@@ -198,7 +210,7 @@ class HardwareManager:
             name="bill",
             timeout=1.0,
             debounce=0.08,
-            bouncetime=30,
+            bouncetime=50,
             decoder=decode_bill,
             accept_one_pulse=False,
         )
