@@ -1700,7 +1700,7 @@ class ProcessingScreen(tk.Frame):
             pass
         self.controller.show_frame(OrderCompleteScreen, timeout_ms=self.controller.default_timeout_ms * 2, skip_error_check=True)
 
-    # Hardware
+    #region Hardware communication
     def start_process(self):
         threading.Thread(target=self._process_worker, daemon=True).start()
 
@@ -1713,6 +1713,7 @@ class ProcessingScreen(tk.Frame):
         mc.run_blender(5)
 
         self.controller.after(0, lambda: self.controller.show_frame(OrderCompleteScreen))
+    #endregion
 
     def _start_machine_worker(self):
         if self.machine_job_running:

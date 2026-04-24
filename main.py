@@ -6,12 +6,12 @@ if __name__ == "__main__":
     
 #region Notes
 """
-On Laptop:
+After updating on Laptop:
 git add . / or just click stage all changes
 git commit -m "update"
 git push
 
-To RPi:
+To sync laptop updates to RPi:
 cd ~/FruitShake
 git pull
 

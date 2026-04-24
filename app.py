@@ -455,6 +455,7 @@ class App(tk.Tk):
             return
 
         if remaining_ms <= self.timeout_warning_ms:
+            self.log(f"Timeout warning up (remaining_ms={remaining_ms})")
             if remaining_ms <= self.timeout_countdown_ms:
                 seconds_left = max(1, math.ceil(remaining_ms / 1000))
                 message = f"Returning to home in {seconds_left}..."
