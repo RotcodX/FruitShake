@@ -49,6 +49,7 @@ class LocalDB:
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
                     stock INTEGER NOT NULL,
+                    price REAL NOT NULL DEFAULT 0,
                     updated_at_local TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -121,12 +122,13 @@ class LocalDB:
             cur.execute("DELETE FROM ingredients")
             for item in ingredients.values():
                 cur.execute("""
-                    INSERT INTO ingredients (id, name, stock)
-                    VALUES (?, ?, ?)
+                    INSERT INTO ingredients (id, name, stock, price)
+                    VALUES (?, ?, ?, ?)
                 """, (
                     item["id"],
                     item["name"],
                     item["stock"],
+                    item["price"],
                 ))
             conn.commit()
         finally:

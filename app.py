@@ -242,6 +242,7 @@ class App(tk.Tk):
                     "id": row["id"],
                     "name": row["name"],
                     "stock": row["stock"],
+                    "price": row["price"],
                 }
             except Exception as e:
                 self.log(f"ingredient row {i} could not be loaded: {e}")
@@ -538,10 +539,11 @@ class App(tk.Tk):
                     "selected_addons": ", ".join(
                         self.addons[k]["name"] for k in addons if k in self.addons
                     ) if addons else None,
+                    "from_backlog": True,
                 }).execute()
 
                 self.local_db.mark_sale_synced(r["sale_id"])
-                self.log(f"Synced sale: {r['sale_id']}")
+                self.log(f"Synced backlog sale: {r['sale_id']}")
 
             except Exception as e:
                 self.local_db.mark_sale_error(r["sale_id"], str(e))
@@ -638,9 +640,12 @@ class App(tk.Tk):
                     "payment_method": payment_method,
                     "selected_fruits": ", ".join(self.catalog[k]["name"] for k in selected_fruits),
                     "selected_addons": ", ".join(self.addons[k]["name"] for k in selected_addons) if selected_addons else None,
+                    "from_backlog": False,
                 }).execute()
 
-                self.log("Sale synced to Supabase.")
+                self.log("Sale synced to Supabase as online sale.")
+                self.local_db.mark_sale_synced(sale_row["sale_id"])
+                self.local_db.delete_old_synced(keep_latest=5)
 
             except Exception as e:
                 self.log(f"Supabase sync failed (kept local): {e}")
@@ -783,7 +788,7 @@ class App(tk.Tk):
 
         fruit_total = sum(self.catalog[k]["price"] for k in fruits)
         addon_total = sum(self.addons[k]["price"] for k in addons)
-        base_total = 5
+        ingredients_total = sum(i["price"] for i in self.ingredients.values())
 
         fruit_count = len(fruits)
 
@@ -798,12 +803,12 @@ class App(tk.Tk):
         if emit_log:
             self.log(
                 "Original Amount: "
-                + money_str(base_total + fruit_total + addon_total)
+                + money_str(ingredients_total + fruit_total + addon_total)
                 + "| Discounted Amount: "
-                + money_str(base_total + discounted_fruit_total + addon_total)
+                + money_str(ingredients_total + discounted_fruit_total + addon_total)
             )
         # round up to peso dahil sino naman nagdadala ng centavos
-        return math.ceil(base_total + discounted_fruit_total + addon_total)
+        return math.ceil(ingredients_total + discounted_fruit_total + addon_total)
 
     def calculate_total(self):
         return self.calculate_total_for_selection()
@@ -834,7 +839,7 @@ class App(tk.Tk):
             return
 
         # NEW: ignore unrealistic spikes
-        if amount > 200:   # adjust if needed
+        if amount > 120:   # adjust if needed
             self.log(f"Rejected suspicious cash amount: {amount}")
             return
 
@@ -1014,6 +1019,8 @@ class App(tk.Tk):
                     "id": row["id"],
                     "name": row["name"],
                     "stock": row["stock"],
+                    "price": row["price"],
+                    
                 }
 
             self.log(f"Loaded local fruits count: {len(self.catalog)}")
