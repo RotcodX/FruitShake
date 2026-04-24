@@ -75,7 +75,7 @@ class CoinAcceptor:
         pin,
         name="coin",
         pulse_timeout=0.7,   # 500 ms
-        noise_filter=0.05   # 25 ms
+        noise_filter=0.03   # 3 ms
     ):
         self.app = app
         self.pin = pin
@@ -149,7 +149,7 @@ class CoinAcceptor:
                 f"{self.name}: pulse train finalized with {pulses} pulse(s) "
                 f"after timeout={self.pulse_timeout:.3f}s"
             )
-
+            """ 
             # Reject too short / empty pulse trains
             if pulses == 0:
                 self.app.log(f"{self.name}: ignored empty ({pulses} pulse)")
@@ -163,7 +163,7 @@ class CoinAcceptor:
                 self.pulse_count = 0
                 self.pulse_active = False
                 return
-            
+             """
             coin_value = self.decode_coin(pulses)
 
             self.app.log(f"{self.name}: pulses={pulses} -> decoded value={coin_value}")
@@ -184,7 +184,7 @@ class CoinAcceptor:
 
     def decode_coin(self, pulses):
         # 1 peso
-        if pulses == 1:
+        if 1 <= pulses <= 3:
             return 1
 
         # 5 peso

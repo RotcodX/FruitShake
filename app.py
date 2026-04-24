@@ -834,7 +834,7 @@ class App(tk.Tk):
             return
 
         # NEW: ignore unrealistic spikes
-        if amount > 20:   # adjust if needed
+        if amount > 200:   # adjust if needed
             self.log(f"Rejected suspicious cash amount: {amount}")
             return
 
