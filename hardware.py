@@ -88,30 +88,67 @@ class MoneyPulseAcceptor:
                 self.app.log(f"{self.name}: reading pulses... ({self.pulse_count})")
                 self.last_debug_log = now
 
+        with self.lock:
+            if self.last_pulse_time and (now - self.last_pulse_time) < self.debounce:
+                return
+
+            # initialize first pulse time
+            if self.pulse_count == 0:
+                self.first_pulse_time = now
+
+            # hard cap to prevent infinite growth
+            if self.pulse_count > 120:
+                return
+
+            self.pulse_count += 1
+            self.last_pulse_time = now
+            self.pulse_active = True
+
     def _poll_finalize(self):
         now = time.monotonic()
 
+        # ── STEP 1: safely read shared values (short lock only)
         with self.lock:
-            should_finalize = (
-                self.pulse_active
-                and self.last_pulse_time
-                and (now - self.last_pulse_time) > self.timeout
-            )
-
-            if not should_finalize:
-                self.app.after(10, self._poll_finalize)
-                return
-
+            pulse_active = self.pulse_active
+            last_time = self.last_pulse_time
             pulses = self.pulse_count
+            first_time = getattr(self, "first_pulse_time", 0)
 
-            # Reset immediately while locked so the next coin/bill can be read
+        # ── STEP 2: determine if we should finalize
+        should_finalize = (
+            pulse_active
+            and last_time
+            and (now - last_time) > self.timeout
+        )
+
+        # ── STEP 3: force finalize if pulse count too high
+        if pulses >= 60:
+            self.app.log(f"{self.name}: force finalize ({pulses} pulses)")
+            should_finalize = True
+
+        # ── STEP 4: force finalize if time window exceeded
+        MAX_WINDOW = 1.2
+        if first_time and (now - first_time) > MAX_WINDOW:
+            self.app.log(f"{self.name}: forced by max window ({pulses} pulses)")
+            should_finalize = True
+
+        # ── STEP 5: if not ready, reschedule and exit
+        if not should_finalize:
+            self.app.after(10, self._poll_finalize)
+            return
+
+        # ── STEP 6: reset values safely
+        with self.lock:
+            pulses = self.pulse_count
             self.pulse_count = 0
             self.last_pulse_time = 0.0
             self.pulse_active = False
-            self.last_debug_log = 0.0
+            self.first_pulse_time = 0
 
-        self.app.log(f"{self.name}: detected {pulses} pulse(s), processing...")
+        # ── STEP 7: processing log
+        self.app.log(f"{self.name}: FINALIZING with {pulses} pulses")
 
+        # ── STEP 8: decode
         value = self.decoder(pulses)
 
         if value > 0:
@@ -123,6 +160,7 @@ class MoneyPulseAcceptor:
         else:
             self.app.log(f"{self.name}: invalid pulse count {pulses}, ignored")
 
+        # ── STEP 9: ALWAYS reschedule
         self.app.after(10, self._poll_finalize)
 
 def decode_coin(pulses):
