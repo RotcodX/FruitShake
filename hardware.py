@@ -30,12 +30,14 @@ class MoneyPulseAcceptor:
         self.name = name
         self.timeout = timeout
         self.debounce = debounce
+        self.bouncetime = bouncetime
         self.decoder = decoder
         self.accept_one_pulse = accept_one_pulse
 
         self.pulse_count = 0
         self.last_pulse_time = 0.0
         self.pulse_active = False
+        self.lock = threading.Lock()
 
         self.app.log(f"{self.name}: initializing on GPIO {pin}")
 
@@ -53,48 +55,59 @@ class MoneyPulseAcceptor:
                 callback=self._on_pulse,
                 bouncetime=bouncetime
             )
-            self.app.log(f"{self.name}: edge detection enabled on GPIO {pin}")
+            self.app.log(
+                f"{self.name}: edge detection enabled on GPIO {pin} "
+                f"(timeout={timeout}, debounce={debounce}, bouncetime={bouncetime})"
+            )
         except Exception as e:
             self.app.log(f"{self.name}: failed to enable edge detection on GPIO {pin}: {e}")
             raise
 
-        self.app.after(50, self._poll_finalize)
+        self.app.after(10, self._poll_finalize)
 
     def _on_pulse(self, channel):
         now = time.monotonic()
 
-        if self.last_pulse_time and (now - self.last_pulse_time) < self.debounce:
-            return
+        with self.lock:
+            if self.last_pulse_time and (now - self.last_pulse_time) < self.debounce:
+                return
 
-        self.pulse_count += 1
-        self.last_pulse_time = now
-        self.pulse_active = True
-
-        self.app.log(f"{self.name}: accepted pulse -> pulse_count={self.pulse_count}")
+            self.pulse_count += 1
+            self.last_pulse_time = now
+            self.pulse_active = True
 
     def _poll_finalize(self):
         now = time.monotonic()
 
-        if self.pulse_active and (now - self.last_pulse_time) > self.timeout:
+        with self.lock:
+            should_finalize = (
+                self.pulse_active
+                and self.last_pulse_time
+                and (now - self.last_pulse_time) > self.timeout
+            )
+
+            if not should_finalize:
+                self.app.after(10, self._poll_finalize)
+                return
+
             pulses = self.pulse_count
-            value = self.decoder(pulses)
-
-            self.app.log(f"{self.name}: finalized {pulses} pulse(s) -> ₱{value}")
-
-            if value > 0:
-                if pulses == 1 and not self.accept_one_pulse:
-                    self.app.log(f"{self.name}: rejected 1-pulse value for stability")
-                else:
-                    self.app.log(f"{self.name}: queueing cash amount ₱{value:.2f}")
-                    self.app.queue_cash(value)
-            else:
-                self.app.log(f"{self.name}: invalid pulse count {pulses}, ignored")
 
             self.pulse_count = 0
             self.last_pulse_time = 0.0
             self.pulse_active = False
 
-        self.app.after(50, self._poll_finalize)
+        value = self.decoder(pulses)
+
+        if value > 0:
+            if pulses == 1 and not self.accept_one_pulse:
+                self.app.log(f"{self.name}: rejected 1-pulse value for stability")
+            else:
+                self.app.log(f"{self.name}: {pulses} pulse(s) -> ₱{value}")
+                self.app.queue_cash(value)
+        else:
+            self.app.log(f"{self.name}: invalid pulse count {pulses}, ignored")
+
+        self.app.after(10, self._poll_finalize)
 
 def decode_coin(pulses):
     if 1 <= pulses <= 3:
