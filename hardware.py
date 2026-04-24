@@ -24,6 +24,7 @@ class MoneyPulseAcceptor:
         bouncetime,
         decoder,
         accept_one_pulse=False,
+        debug_cooldown=0.25,
     ):
         self.app = app
         self.pin = pin
@@ -33,10 +34,13 @@ class MoneyPulseAcceptor:
         self.bouncetime = bouncetime
         self.decoder = decoder
         self.accept_one_pulse = accept_one_pulse
+        self.debug_cooldown = debug_cooldown
 
         self.pulse_count = 0
         self.last_pulse_time = 0.0
         self.pulse_active = False
+        self.last_debug_log = 0.0
+
         self.lock = threading.Lock()
 
         self.app.log(f"{self.name}: initializing on GPIO {pin}")
@@ -68,10 +72,6 @@ class MoneyPulseAcceptor:
     def _on_pulse(self, channel):
         now = time.monotonic()
 
-        # If too much time passed → treat as new signal
-        if self.pulse_active and (now - self.last_pulse_time) > 0.2:
-            self.pulse_count = 0
-
         with self.lock:
             if self.last_pulse_time and (now - self.last_pulse_time) < self.debounce:
                 return
@@ -80,10 +80,16 @@ class MoneyPulseAcceptor:
             self.last_pulse_time = now
             self.pulse_active = True
 
+            if self.pulse_count == 1:
+                self.app.log(f"{self.name}: signal detected")
+
+            # Controlled debug: no terminal spam
+            if now - self.last_debug_log >= self.debug_cooldown:
+                self.app.log(f"{self.name}: reading pulses... ({self.pulse_count})")
+                self.last_debug_log = now
+
     def _poll_finalize(self):
         now = time.monotonic()
-        if hasattr(self, "cooldown_until") and time.monotonic() < self.cooldown_until:
-            return
 
         with self.lock:
             should_finalize = (
@@ -98,15 +104,14 @@ class MoneyPulseAcceptor:
 
             pulses = self.pulse_count
 
+            # Reset immediately while locked so the next coin/bill can be read
             self.pulse_count = 0
             self.last_pulse_time = 0.0
             self.pulse_active = False
-        """ 
-        # Reject weird tiny pulse trains (noise bursts)
-        if pulses < 2:
-            self.app.log(f"{self.name}: ignored noise ({pulses} pulse)")
-            return
-        """
+            self.last_debug_log = 0.0
+
+        self.app.log(f"{self.name}: detected {pulses} pulse(s), processing...")
+
         value = self.decoder(pulses)
 
         if value > 0:
@@ -119,7 +124,6 @@ class MoneyPulseAcceptor:
             self.app.log(f"{self.name}: invalid pulse count {pulses}, ignored")
 
         self.app.after(10, self._poll_finalize)
-        self.cooldown_until = time.monotonic() + 1.0
 
 def decode_coin(pulses):
     if 1 <= pulses <= 3:
@@ -197,20 +201,20 @@ class HardwareManager:
             app,
             pin=17,
             name="coin",
-            timeout=0.7,
+            timeout=0.4,
             debounce=0.06,
-            bouncetime=50,
+            bouncetime=20,
             decoder=decode_coin,
-            accept_one_pulse=False,  # set True later if ₱1 becomes stable
+            accept_one_pulse=False,
         )
 
         self.bill_acceptor = MoneyPulseAcceptor(
             app,
             pin=24,
             name="bill",
-            timeout=1.0,
-            debounce=0.08,
-            bouncetime=50,
+            timeout=0.8,
+            debounce=0.05,
+            bouncetime=30,
             decoder=decode_bill,
             accept_one_pulse=False,
         )
