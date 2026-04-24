@@ -82,6 +82,9 @@ class App(tk.Tk):
 
         # Database Payment tracking
         self.payment_method = None
+        # Payment / processing locks
+        self.accept_cash_input = False
+        self.processing_lock = False
 
         # Track total income
         self.total_income = 0.0
@@ -756,6 +759,15 @@ class App(tk.Tk):
     def show_frame(self, cls, timeout_ms=None, pause=False, skip_error_check=False):
         if self.busy and cls is not ProcessingScreen:
             return
+        # Hard block repeated ProcessingScreen navigation.
+        if cls is ProcessingScreen and getattr(self, "processing_lock", False):
+            self.log("show_frame ignored: ProcessingScreen is already locked/running")
+            return
+
+        # While processing is locked, do not allow navigation away except to OrderComplete/Error.
+        if getattr(self, "processing_lock", False) and cls not in (ProcessingScreen, OrderCompleteScreen, ErrorScreen):
+            self.log(f"show_frame ignored: processing lock active, blocked {cls.__name__}")
+            return
         frame = self.frames[cls]
 
         # BEFORE we raise the requested frame, check global error state
@@ -766,6 +778,23 @@ class App(tk.Tk):
 
         frame = self.frames[cls]
         self.current_frame = frame
+
+        # Enable hardware cash input only on CashMethodScreen.
+        self.accept_cash_input = (cls is CashMethodScreen)
+
+        if cls is ProcessingScreen:
+            self.processing_lock = True
+            self.accept_cash_input = False
+
+        if cls in (OrderCompleteScreen, WelcomeScreen, ErrorScreen):
+            self.processing_lock = False
+            self.accept_cash_input = False
+
+        # Lock processing once it starts.
+        if cls is ProcessingScreen:
+            self.processing_lock = True
+            self.accept_cash_input = False
+
         self.hide_timeout_warning()
         frame.tkraise()
 
@@ -891,8 +920,18 @@ class App(tk.Tk):
         if amount <= 0:
             return
 
-        # NEW: ignore unrealistic spikes
-        if amount > 120:   # adjust if needed
+        # Ignore hardware money pulses unless cash input is explicitly enabled.
+        if not getattr(self, "accept_cash_input", False):
+            self.log(f"queue_cash ignored ₱{float(amount):.2f}: cash input disabled")
+            return
+
+        # Only accept cash while the visible screen is CashMethodScreen.
+        if not isinstance(getattr(self, "current_frame", None), CashMethodScreen):
+            self.log(f"queue_cash ignored ₱{float(amount):.2f}: not on CashMethodScreen")
+            return
+
+        # Ignore unrealistic spikes.
+        if amount > 120:
             self.log(f"Rejected suspicious cash amount: {amount}")
             return
 
@@ -904,12 +943,21 @@ class App(tk.Tk):
                 amount = self.cash_queue.get_nowait()
                 self.log(f"_poll_cash_queue: dequeued ₱{float(amount):.2f}")
 
+                if not getattr(self, "accept_cash_input", False):
+                    self.log("_poll_cash_queue: ignored because cash input is disabled")
+                    continue
+
+                if not isinstance(getattr(self, "current_frame", None), CashMethodScreen):
+                    self.log("_poll_cash_queue: ignored because current screen is not CashMethodScreen")
+                    continue
+
                 cash_screen = self.frames.get(CashMethodScreen)
                 if cash_screen:
                     self.log("_poll_cash_queue: forwarding amount to CashMethodScreen.add_cash()")
                     cash_screen.add_cash(amount)
                 else:
                     self.log("_poll_cash_queue: CashMethodScreen not found")
+
         except queue.Empty:
             pass
         except Exception as e:

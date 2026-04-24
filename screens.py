@@ -1142,6 +1142,17 @@ class CashMethodScreen(tk.Frame):
     def add_cash(self, amount):
         """Called to add money from hardware or admin simulator."""
         self.controller.log(f"CashMethod.add_cash called with amount={amount}")
+        if not getattr(self.controller, "accept_cash_input", False):
+            self.controller.log(f"CashMethod.add_cash ignored ₱{amount}: cash input disabled")
+            return
+
+        if not isinstance(getattr(self.controller, "current_frame", None), CashMethodScreen):
+            self.controller.log(f"CashMethod.add_cash ignored ₱{amount}: not current screen")
+            return
+
+        if getattr(self.controller, "processing_lock", False):
+            self.controller.log(f"CashMethod.add_cash ignored ₱{amount}: processing lock active")
+            return
         try:
             amount = float(amount)
         except Exception:
@@ -1157,7 +1168,8 @@ class CashMethodScreen(tk.Frame):
 
         total = self.controller.calculate_total()
         if self.entered_amount + 0.0001 >= total:
-            if self.controller.busy:
+            if self.controller.busy or getattr(self.controller, "processing_lock", False):
+                self.controller.log("CashMethod: payment complete ignored because app is busy/processing")
                 return
 
             self.controller.payment_method = "Cash"
