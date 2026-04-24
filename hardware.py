@@ -231,6 +231,7 @@ class HardwareManager:
 
         # Change pins to match your wiring
         self.coin_acceptor = CoinAcceptor(app, pin=23, name="coin")
+        # self.bill_acceptor = PulseAcceptor(app, pin=24, name="bill")
 
         # outputs
         self.servo = Servo(18) if Servo else None
