@@ -1094,10 +1094,11 @@ class CashMethodScreen(tk.Frame):
         self._admin_info_label.place(relx=0.5, rely=0.82, anchor="center")
 
     def _admin_add_cash(self, amount):
-        """Admin helper — call add_cash and refresh admin labels."""
-        self.add_cash(amount)
-        # ensure admin labels update immediately
-        self._update_admin_labels()
+        """Admin helper — simulate hardware cash input through queue_cash()."""
+        self.controller.log(f"Cash admin simulator: queueing ₱{float(amount):.2f}")
+        self.controller.queue_cash(amount)
+        # queue_cash is processed by App._poll_cash_queue(), so refresh after a short delay.
+        self.after(250, self._update_admin_labels)
 
     def _update_admin_labels(self):
         """Refresh price/entered text inside admin panel."""
