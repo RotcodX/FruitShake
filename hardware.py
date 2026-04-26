@@ -27,6 +27,7 @@ class MoneyPulseAcceptor:
         debug_cooldown=0.5,
         process_delay=0.2,
         shared_processing_lock=None,
+        
     ):
         self.app = app
         self.pin = pin
@@ -47,6 +48,9 @@ class MoneyPulseAcceptor:
         self.last_debug_log = 0.0
         self.first_pulse_time = 0.0
         self.processing_until = 0.0
+
+        self.debug_status_interval = 3.0
+        self.last_status_log = 0.0
 
         self.lock = threading.Lock()
 
@@ -113,8 +117,32 @@ class MoneyPulseAcceptor:
                 self.app.log(f"{self.name}: reading pulses... ({self.pulse_count})")
                 self.last_debug_log = now
 
+    def _debug_status(self, now):
+        if now - self.last_status_log < self.debug_status_interval:
+            return
+
+        with self.lock:
+            pulses = self.pulse_count
+            active = self.pulse_active
+            last_time = self.last_pulse_time
+            first_time = self.first_pulse_time
+
+        age_since_last = (now - last_time) if last_time else 0
+        age_since_first = (now - first_time) if first_time else 0
+
+        self.app.log(
+            f"{self.name}: STATUS active={active}, "
+            f"pulses={pulses}, "
+            f"since_last={age_since_last:.2f}s, "
+            f"since_first={age_since_first:.2f}s"
+        )
+
+        self.last_status_log = now
+
     def _poll_finalize(self):
         now = time.monotonic()
+
+        self._debug_status(now)
 
         with self.lock:
             pulse_active = self.pulse_active
@@ -255,7 +283,7 @@ class HardwareManager:
             app,
             pin=24,  # keep your current bill GPIO unless you rewired to GPIO 18
             name="bill",
-            timeout=1.5,
+            timeout=4.0,
             debounce=0.1,
             bouncetime=15,
             decoder=decode_bill,
