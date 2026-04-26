@@ -1524,7 +1524,7 @@ class ProcessingScreen(tk.Frame):
 
         self.controller.log("Processing screen shown — starting progress")
 
-        self.start_process()
+        # self.start_process()
 
         # reset progress visuals
         self.progress = 0
@@ -1714,6 +1714,7 @@ class ProcessingScreen(tk.Frame):
         self.controller.show_frame(OrderCompleteScreen, timeout_ms=self.controller.default_timeout_ms * 2, skip_error_check=True)
 
     #region Hardware communication
+    """ 
     def start_process(self):
         threading.Thread(target=self._process_worker, daemon=True).start()
 
@@ -1726,8 +1727,7 @@ class ProcessingScreen(tk.Frame):
         mc.run_blender(5)
 
         self.controller.after(0, lambda: self.controller.show_frame(OrderCompleteScreen))
-    #endregion
-
+     """
     def _start_machine_worker(self):
         if self.machine_job_running:
             return
@@ -1756,19 +1756,28 @@ class ProcessingScreen(tk.Frame):
             )
 
             # Example sequence — adjust timings later
-            machine.dispense_cup()
+            self.controller.log("Machine worker: dispense_cup start")
+            machine.dispense_cup(5)
+            self.controller.log("Machine worker: dispense_cup done")
 
             # simple placeholder fruit dispense time based on number of fruits
             if fruits:
+                self.controller.log("Machine worker: dispense_fruit start")
                 machine.dispense_fruit(max(1, len(fruits)))
+                self.controller.log("Machine worker: dispense_fruit done")
 
             # simple placeholder liquid time
-            machine.add_liquid(2)
+            self.controller.log("Machine worker: add_liquid start")
+            machine.add_liquid(5)
+            self.controller.log("Machine worker: add_liquid done")
 
             # blender
+            self.controller.log("Machine worker: run_blender start")
             machine.run_blender(5)
+            self.controller.log("Machine worker: run_blender done")
 
             self.controller.after(0, self._mark_machine_done)
+            self.controller.log("Machine worker: machine worker done")
 
         except Exception as e:
             self.controller.after(0, lambda err=e: self._mark_machine_error(err))
@@ -1783,6 +1792,7 @@ class ProcessingScreen(tk.Frame):
         self.machine_job_done = True
         self.machine_job_error = err
         self.controller.log(f"Processing: machine worker failed: {err}")
+    #endregion
 
 class OrderCompleteScreen(tk.Frame):
     def __init__(self, parent, controller):

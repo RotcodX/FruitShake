@@ -290,7 +290,7 @@ class HardwareManager:
             accept_one_pulse=False,
             debug_cooldown=0.5,
             process_delay=0.5,
-            shared_processing_lock=self.money_processing_lock,
+            shared_processing_lock=None,
         )
 
         # outputs
