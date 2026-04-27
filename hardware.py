@@ -49,7 +49,7 @@ class MoneyPulseAcceptor:
         self.first_pulse_time = 0.0
         self.processing_until = 0.0
 
-        self.debug_status_interval = 3.0
+        self.debug_status_interval = 5.0
         self.last_status_log = 0.0
 
         self.lock = threading.Lock()
@@ -106,7 +106,7 @@ class MoneyPulseAcceptor:
 
             if self.pulse_count == 0:
                 self.first_pulse_time = now
-                self.app.log(f"{self.name}: signal detected")
+                self.print(f"{self.name}: signal detected")
 
             self.pulse_count += 1
             self.last_pulse_time = now
@@ -114,7 +114,7 @@ class MoneyPulseAcceptor:
             self.pulse_active = True
 
             if now - self.last_debug_log >= self.debug_cooldown:
-                self.app.log(f"{self.name}: reading pulses... ({self.pulse_count})")
+                # self.app.log(f"{self.name}: reading pulses... ({self.pulse_count})")
                 self.last_debug_log = now
 
     def _debug_status(self, now):
@@ -142,7 +142,7 @@ class MoneyPulseAcceptor:
     def _poll_finalize(self):
         now = time.monotonic()
 
-        self._debug_status(now)
+        # self._debug_status(now)
 
         with self.lock:
             pulse_active = self.pulse_active
@@ -178,12 +178,12 @@ class MoneyPulseAcceptor:
 
         if value > 0:
             if pulses == 1 and not self.accept_one_pulse:
-                self.app.log(f"{self.name}: rejected 1-pulse value for stability")
+                print(f"{self.name}: rejected 1-pulse value for stability")
             else:
-                self.app.log(f"{self.name}: {pulses} pulse(s) -> ₱{value}")
+                print(f"{self.name}: {pulses} pulse(s) -> ₱{value}")
                 self.app.queue_cash(value)
         else:
-            self.app.log(f"{self.name}: invalid pulse count {pulses}, ignored")
+            print(f"{self.name}: invalid pulse count {pulses}, ignored")
 
         def unlock_processing():
             self._set_shared_processing(False)
@@ -237,7 +237,7 @@ class RelayController:
 
 class MachineController:
     def __init__(self):
-        self.relays = RelayController([23, 18, 27, 22, 5, 6, 25, 8])
+        self.relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
 
     def dispense_cup(self, seconds):
         print("Dispensing cup.")
@@ -245,7 +245,7 @@ class MachineController:
 
     def add_liquid(self, seconds):
         print(f"Dispensing liquid for {seconds}s.")
-        self.relays.pulse(18, seconds)
+        self.relays.pulse(24, seconds)
 
     def dispense_fruit(self, seconds):
         print(f"Dispensing fruit for {seconds}s.")

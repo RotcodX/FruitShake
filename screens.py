@@ -226,7 +226,7 @@ class FruitSelectionScreen(tk.Frame):
 
         # selected highlight overlay tag
         self.sel_overlay_tag = "sel_overlay"
-        self.show_selection_debug_rect = True   # set False for final release to disable select squares
+        self.show_selection_debug_rect = False   # set False for final release to disable select squares
 
         # -----------------------
         # PRELOAD small overlay images into a cache to avoid heavy Image.open / PhotoImage
@@ -1714,7 +1714,7 @@ class ProcessingScreen(tk.Frame):
         self.controller.show_frame(OrderCompleteScreen, timeout_ms=self.controller.default_timeout_ms * 2, skip_error_check=True)
 
     #region Hardware communication
-    """ 
+    """ Old code
     def start_process(self):
         threading.Thread(target=self._process_worker, daemon=True).start()
 
@@ -1728,6 +1728,7 @@ class ProcessingScreen(tk.Frame):
 
         self.controller.after(0, lambda: self.controller.show_frame(OrderCompleteScreen))
      """
+    
     def _start_machine_worker(self):
         if self.machine_job_running:
             return

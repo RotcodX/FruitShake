@@ -157,13 +157,11 @@ class App(tk.Tk):
 
         self.cash_queue = queue.Queue()
         # Enable for RPI GPIO support, comment out for testing on non-RPI platforms
-        if HARDWARE_AVAILABLE:
-            self.hardware = HardwareManager(self)
-            self.machine = MachineController()
-        else:
-            self.hardware = None
-            self.machine = None
-            self.log("Hardware unavailable on this environment; using UI-only mode")
+        self.hardware = None
+        self.machine = None
+
+        if not HARDWARE_AVAILABLE:
+            self.log("Hardware unavailable; UI-only mode")
 
             
         self.after(50, self._poll_cash_queue)
@@ -177,6 +175,20 @@ class App(tk.Tk):
 
         # First Screen shown: Welcome Screen, change for testing
         self.show_frame(WelcomeScreen, pause=True)
+        # Initiate Hardware
+        if HARDWARE_AVAILABLE:
+            self.after(1500, self._init_hardware_late)
+
+    def _init_hardware_late(self):
+        try:
+            self.log("Initializing hardware...")
+            self.hardware = HardwareManager(self)
+            self.machine = MachineController()
+            self.log("Hardware initialized.")
+        except Exception as e:
+            self.log(f"Hardware init failed: {e}")
+            self.hardware = None
+            self.machine = None
 
     # Database
     def load_remote_data(self):
