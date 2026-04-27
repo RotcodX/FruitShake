@@ -890,7 +890,8 @@ class App(tk.Tk):
                 + money_str(ingredients_total + discounted_fruit_total + addon_total)
             )
         # round up to peso dahil sino naman nagdadala ng centavos
-        return math.ceil(ingredients_total + discounted_fruit_total + addon_total)
+        total = (ingredients_total + discounted_fruit_total + addon_total)
+        return math.ceil(total / 5) * 5
 
     def calculate_total(self):
         return self.calculate_total_for_selection()

@@ -190,10 +190,10 @@ class MoneyPulseAcceptor:
 
         self.app.after(int(self.process_delay * 1000), unlock_processing)
         self.app.after(100, self._poll_finalize)
-
+ 
 def decode_coin(pulses):
     if 1 <= pulses <= 3:
-        return 1
+        return 0 # 1 peso coin pulses are ignored and just adds nothing to payment
     if 4 <= pulses <= 7:
         return 5
     if 8 <= pulses <= 13:
