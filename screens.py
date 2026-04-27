@@ -988,6 +988,8 @@ class CashMethodScreen(tk.Frame):
         # Internal state
         self.entered_amount = 0.0
         self._auto_proceed_job = None
+        self.payment_indicator_img = load_image_tk("paymentIndicator.png")
+        self.payment_indicator = self.canvas.create_image(1024 - 30, 600 - 30, image=self.payment_indicator_img, anchor="se", state="hidden")
 
         # Summary bar
         self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
@@ -1119,6 +1121,7 @@ class CashMethodScreen(tk.Frame):
         self._update_price_text()
         self._update_entered_text()
         self.render_summary()
+        self.hide_indicator()
         # ensure admin hidden when arriving
         if self.admin_visible:
             self.admin_panel.place_forget()
@@ -1142,7 +1145,11 @@ class CashMethodScreen(tk.Frame):
     # -------------------------
     def add_cash(self, amount):
         """Called to add money from hardware or admin simulator."""
+        self.show_indicator()
         self.controller.log(f"CashMethod.add_cash called with amount={amount}")
+        if hasattr(self, "_indicator_after_id"):
+            self.after_cancel(self._indicator_after_id)
+        self._indicator_after_id = self.after(1500, self.hide_indicator)
         if not getattr(self.controller, "accept_cash_input", False):
             self.controller.log(f"CashMethod.add_cash ignored ₱{amount}: cash input disabled")
             return
@@ -1226,6 +1233,12 @@ class CashMethodScreen(tk.Frame):
             return
         self.controller.refresh_after_sale()
         self.controller.show_frame(ProcessingScreen, pause=True, skip_error_check=True)
+
+    def show_indicator(self):
+        self.canvas.itemconfig(self.payment_indicator, state="normal")
+
+    def hide_indicator(self):
+        self.canvas.itemconfig(self.payment_indicator, state="hidden")
 
 class PaypalMethodScreen(tk.Frame):
     def __init__(self, parent, controller):
@@ -1714,21 +1727,6 @@ class ProcessingScreen(tk.Frame):
         self.controller.show_frame(OrderCompleteScreen, timeout_ms=self.controller.default_timeout_ms * 2, skip_error_check=True)
 
     #region Hardware communication
-    """ Old code
-    def start_process(self):
-        threading.Thread(target=self._process_worker, daemon=True).start()
-
-    def _process_worker(self):
-        mc = self.controller.machine
-
-        mc.dispense_cup(5)
-        mc.dispense_fruit(3)
-        mc.add_liquid(1)
-        mc.run_blender(5)
-
-        self.controller.after(0, lambda: self.controller.show_frame(OrderCompleteScreen))
-     """
-    
     def _start_machine_worker(self):
         if self.machine_job_running:
             return

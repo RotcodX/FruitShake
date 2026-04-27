@@ -49,7 +49,7 @@ class MoneyPulseAcceptor:
         self.first_pulse_time = 0.0
         self.processing_until = 0.0
 
-        self.debug_status_interval = 3.0
+        self.debug_status_interval = 5.0
         self.last_status_log = 0.0
 
         self.lock = threading.Lock()
@@ -106,15 +106,16 @@ class MoneyPulseAcceptor:
 
             if self.pulse_count == 0:
                 self.first_pulse_time = now
-                self.app.log(f"{self.name}: signal detected")
+                print(f"{self.name}: signal detected")   # ✅ SAFE
 
             self.pulse_count += 1
             self.last_pulse_time = now
             self.last_interrupt_time = now
             self.pulse_active = True
 
+            # LIMITED debug (every X seconds only)
             if now - self.last_debug_log >= self.debug_cooldown:
-                self.app.log(f"{self.name}: reading pulses... ({self.pulse_count})")
+                print(f"{self.name}: pulses={self.pulse_count}")
                 self.last_debug_log = now
 
     def _debug_status(self, now):
@@ -142,7 +143,7 @@ class MoneyPulseAcceptor:
     def _poll_finalize(self):
         now = time.monotonic()
 
-        self._debug_status(now)
+        # self._debug_status(now)
 
         with self.lock:
             pulse_active = self.pulse_active
@@ -172,18 +173,18 @@ class MoneyPulseAcceptor:
             self.last_debug_log = 0.0
             self.processing_until = time.monotonic() + self.process_delay
 
-        self.app.log(f"{self.name}: FINALIZING with {pulses} pulses")
+        print(f"{self.name}: FINALIZING with {pulses} pulses")
 
         value = self.decoder(pulses)
 
         if value > 0:
             if pulses == 1 and not self.accept_one_pulse:
-                self.app.log(f"{self.name}: rejected 1-pulse value for stability")
+                print(f"{self.name}: rejected 1-pulse value for stability")
             else:
-                self.app.log(f"{self.name}: {pulses} pulse(s) -> ₱{value}")
+                print(f"{self.name}: {pulses} pulse(s) -> ₱{value}")
                 self.app.queue_cash(value)
         else:
-            self.app.log(f"{self.name}: invalid pulse count {pulses}, ignored")
+            print(f"{self.name}: invalid pulse count {pulses}, ignored")
 
         def unlock_processing():
             self._set_shared_processing(False)
@@ -281,7 +282,7 @@ class HardwareManager:
 
         self.bill_acceptor = MoneyPulseAcceptor(
             app,
-            pin=24,  # keep your current bill GPIO unless you rewired to GPIO 18
+            pin=18,  # keep your current bill GPIO unless you rewired to GPIO 18
             name="bill",
             timeout=4.0,
             debounce=0.1,
@@ -290,7 +291,7 @@ class HardwareManager:
             accept_one_pulse=False,
             debug_cooldown=0.5,
             process_delay=0.5,
-            shared_processing_lock=None,
+            shared_processing_lock=self.money_processing_lock,
         )
 
         # outputs

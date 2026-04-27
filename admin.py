@@ -98,20 +98,20 @@ class AdminPanel(tk.Frame):
         self.visible = True
         self.admin_visible = True
         self._update_fs_button_text()
-        """ # Let AdminPanel have inactivity.
+        
         try:
-            self.controller.pause_inactivity()
+            self.controller.resume_inactivity()
             self.controller.log("AdminPanel: inactivity paused")
         except Exception:
             pass
-        """
+
     def hide(self):
         self.place_forget()
         self.visible = False
         self.admin_visible = False
 
         try:
-            self.controller.resume_inactivity()
+            self.controller.pause_inactivity()
             self.controller.log("AdminPanel: inactivity resumed")
         except Exception:
             pass
