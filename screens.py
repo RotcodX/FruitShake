@@ -1346,6 +1346,40 @@ class ProcessingScreen(tk.Frame):
         # touch feedback on tap
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
 
+        # Simple UI mode:
+        # Skips fake loading bar/percent/animated handle and only shows text.
+        self.simple_ui = bool(getattr(self.controller, "simpleUI", False))
+
+        if self.simple_ui:
+            self.simple_processing_text = OutlinedText(
+                self.canvas,
+                SCREEN_W // 2,
+                SCREEN_H // 2,
+                text="Processing Order...",
+                font=("Inter", 34),
+                fill="#FDDAB1",
+                stroke=3,
+                stroke_fill="#FF3463",
+                mode="pillow",
+                anchor="center",
+                pillow_font_path=FONT_INTER
+            )
+
+            self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W // 2, y=560)
+
+            self.progress = 0
+            self.progress_job = None
+            self.handle_sway_job = None
+
+            self.machine_job_running = False
+            self.machine_job_done = False
+            self.machine_job_error = None
+
+            self._fruits_snapshot = []
+            self._addons_snapshot = []
+
+            return
+
         # progress bar coordinates (kept as requested)
         self.bar_x1, self.bar_y1, self.bar_x2, self.bar_y2 = (137, 156, 887, 315)
         bar_w = self.bar_x2 - self.bar_x1
@@ -1517,6 +1551,41 @@ class ProcessingScreen(tk.Frame):
                 return delay
         return 0.12
 
+    def _get_simple_processing_duration_ms(self):
+        """
+        Match the approximate duration of the normal fake progress animation,
+        but do not require the normal progress UI attributes to exist.
+
+        This is needed because simpleUI returns early in __init__ before
+        segment_delays / finish_wait_s are normally created.
+        """
+        segment_delays = getattr(self, "segment_delays", [
+            (0, 15, 0.12),     # Dispensing Fruit
+            (16, 30, 0.12),    # Dispensing other ingredients
+            (31, 70, 0.18),    # Blending
+            (71, 90, 0.12),    # Pouring to cup
+            (91, 99, 0.08),    # Sealing cup
+            (100, 100, 0.0),
+        ])
+
+        finish_wait_s = getattr(self, "finish_wait_s", 1.5)
+
+        total_s = 0.0
+
+        for pct in range(1, 101):
+            delay_s = 0.12
+
+            for lo, hi, delay in segment_delays:
+                if lo <= pct <= hi:
+                    delay_s = delay
+                    break
+
+            total_s += delay_s
+
+        total_s += finish_wait_s
+
+        return int(total_s * 1000)
+
     def render_summary(self):
         parts = []
         if self._fruits_snapshot:
@@ -1537,6 +1606,55 @@ class ProcessingScreen(tk.Frame):
 
         self.controller.log("Processing screen shown — starting progress")
 
+        # cancel any existing jobs
+        if self.progress_job:
+            try:
+                self.after_cancel(self.progress_job)
+            except Exception:
+                pass
+            self.progress_job = None
+
+        # Simple UI mode:
+        # No fake percent/progress/description animation.
+        # Just show "Processing Order..." and wait for hardware worker.
+        if getattr(self, "simple_ui", False):
+            self.progress = 0
+
+            # ProcessingScreen should not use inactivity timeout.
+            # This also protects us even if show_frame has not finished applying pause=True yet.
+            try:
+                self.controller.pause_inactivity()
+            except Exception:
+                pass
+
+            try:
+                self.simple_processing_text.update(text="Processing Order...")
+            except Exception:
+                pass
+
+            # Cancel any previous simple/normal processing job.
+            if self.progress_job:
+                try:
+                    self.after_cancel(self.progress_job)
+                except Exception:
+                    pass
+                self.progress_job = None
+
+            self.machine_job_running = False
+            self.machine_job_done = False
+            self.machine_job_error = None
+
+            # Start hardware worker as usual.
+            self._start_machine_worker()
+
+            # Wait for the same approximate duration as the normal fake progress UI.
+            duration_ms = self._get_simple_processing_duration_ms()
+            self.controller.log(f"Simple ProcessingScreen waiting {duration_ms}ms before finishing")
+
+            self.progress_job = self.after(duration_ms, self._finish)
+
+            return
+
         # self.start_process()
 
         # reset progress visuals
@@ -1545,14 +1663,6 @@ class ProcessingScreen(tk.Frame):
         # if fallback cover exists, put it full-size
         if self.cover is not None:
             self.canvas.coords(self.cover, self.bar_x1, self.bar_y1, self.bar_x2, self.bar_y2)
-
-        # cancel any existing jobs
-        if self.progress_job:
-            try:
-                self.after_cancel(self.progress_job)
-            except Exception:
-                pass
-            self.progress_job = None
 
         # (re)start handle sway if we have a handle
         if self.handle_id and not self.handle_sway_job:
@@ -1568,7 +1678,7 @@ class ProcessingScreen(tk.Frame):
 
         # start ticking
         self._tick_progress()
-
+        
     def _tick_progress(self):
         if self.progress >= 100:
             self.progress = 100

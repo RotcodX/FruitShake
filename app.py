@@ -67,6 +67,11 @@ class App(tk.Tk):
         self.bind_all("<Key-d>", lambda e: self.toggle_debug())
         self.bind_all("<Key-D>", lambda e: self.toggle_debug())
 
+        # Simple UI mode:
+        # True  = use text-only loading/processing indicators
+        # False = use normal GIF/progress UI
+        self.simpleUI = True
+
         self.touch_feedback = TouchFeedbackManager(self)
         self.supabase = create_client(url, key)
         self.local_db = LocalDB()
@@ -115,11 +120,25 @@ class App(tk.Tk):
         container.grid_columnconfigure(0, weight=1)
 
         self.busy = False
-        self.loading_frames, self.loading_delays = load_gif_frames("loading.gif", resize_to=(250, 250))
+        # Loading GIF
+        self.loading_frames = []
+        self.loading_delays = []
+
+        if not self.simpleUI:
+            try:
+                self.loading_frames, self.loading_delays = load_gif_frames(
+                    "loading.gif",
+                    resize_to=(250, 250)
+                )
+            except Exception as e:
+                self.log(f"Failed to load loading.gif, using simple loading text: {e}")
+                self.loading_frames = []
+                self.loading_delays = []
         self.loading_canvas = None
         self.loading_item = None
         self.loading_job = None
         self.loading_frame_index = 0
+        self.loading_text_obj = None
 
         overlay_img = Image.new("RGBA", (SCREEN_W, SCREEN_H), (0, 0, 0, 180))
         self.loading_overlay_photo = ImageTk.PhotoImage(overlay_img)
@@ -697,20 +716,42 @@ class App(tk.Tk):
                 }
 
             try:
-                # insert sale to Supabase
+                # IMPORTANT:
+                # Sync inventory FIRST.
+                # The sales INSERT below triggers the Make webhook, so Supabase stock
+                # must already be fully updated before the sale row is inserted.
+                inventory_synced = self.sync_inventory_to_supabase()
+
+                if not inventory_synced:
+                    self.log("Inventory sync failed; sale remains queued locally.")
+                    return {
+                        "catalog": self.catalog,
+                        "addons": self.addons,
+                        "ingredients": self.ingredients,
+                        "total_income_delta": total,
+                        "payment_method": payment_method,
+                    }
+
+                # Insert sale AFTER inventory is fully synced.
+                # This is what triggers the Make webhook.
                 self.supabase.table("sales").insert({
                     "sale_id": sale_row["sale_id"],
                     "total_price": total,
                     "payment_method": payment_method,
-                    "selected_fruits": ", ".join(self.catalog[k]["name"] for k in selected_fruits),
-                    "selected_addons": ", ".join(self.addons[k]["name"] for k in selected_addons) if selected_addons else None,
+                    "selected_fruits": ", ".join(
+                        self.catalog[k]["name"]
+                        for k in selected_fruits
+                        if k in self.catalog
+                    ),
+                    "selected_addons": ", ".join(
+                        self.addons[k]["name"]
+                        for k in selected_addons
+                        if k in self.addons
+                    ) if selected_addons else None,
                     "from_backlog": False,
                 }).execute()
 
                 self.log("Sale synced to Supabase as online sale.")
-
-                # Push updated local stock/sales totals to Supabase
-                self.sync_inventory_to_supabase()
 
                 self.local_db.mark_sale_synced(sale_row["sale_id"])
                 self.local_db.delete_old_synced(keep_latest=5)
@@ -993,7 +1034,26 @@ class App(tk.Tk):
                 image=self.loading_overlay_photo,
             )
 
-        if not self.loading_frames:
+        # Simple mode OR GIF failed/missing:
+        # show centered "Loading..." text instead of animated GIF.
+        if self.simpleUI or not self.loading_frames:
+            try:
+                self.loading_text_obj = OutlinedText(
+                    canvas,
+                    SCREEN_W // 2,
+                    SCREEN_H // 2,
+                    text="Loading...",
+                    font=("Inter", 34),
+                    fill="#FDDAB1",
+                    stroke=3,
+                    stroke_fill="#FF3463",
+                    mode="pillow",
+                    anchor="center",
+                    pillow_font_path=FONT_INTER
+                )
+            except Exception as e:
+                self.log(f"Simple loading text failed: {e}")
+                self.loading_text_obj = None
             return
 
         self.loading_item = canvas.create_image(
@@ -1034,6 +1094,13 @@ class App(tk.Tk):
             except Exception:
                 pass
 
+        if self.loading_canvas and self.loading_text_obj:
+            try:
+                for item_id in getattr(self.loading_text_obj, "_ids", []):
+                    self.loading_canvas.delete(item_id)
+            except Exception:
+                pass
+            
         if self.loading_canvas and self.loading_overlay_item:
             try:
                 self.loading_canvas.delete(self.loading_overlay_item)
@@ -1042,6 +1109,7 @@ class App(tk.Tk):
 
         self.loading_canvas = None
         self.loading_item = None
+        self.loading_text_obj = None
         self.loading_overlay_item = None
         self.loading_job = None
         self.resume_inactivity()
