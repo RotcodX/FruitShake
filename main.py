@@ -7,8 +7,8 @@ if __name__ == "__main__":
 #region Notes
 """
 After updating on Laptop:
-git add . / or just click stage all changes
-git commit -m "update"
+git add . (or just click stage all changes)
+git commit -m "update information"
 git push
 
 To sync laptop updates to RPi:
@@ -18,5 +18,10 @@ git pull
 Virtual Environment:
 Previously: Shift + Alt + P -> Select Interpreter -> Enter interpreter path -> Select the venv manually from folders
 Try: source ~/venv-rpi/bin/activate
+
+
+Variable Information:
+app.py:
+- self.simpleUI = True # for simple display UI instead of showing loading screen GIF and procressing screen loading bar.
 """
 #endregion
