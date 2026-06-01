@@ -23,5 +23,6 @@ Try: source ~/venv-rpi/bin/activate
 Variable Information:
 app.py:
 - self.simpleUI = True # for simple display UI instead of showing loading screen GIF and procressing screen loading bar.
+                = False # for showing original UI with loading screen GIF and processing screen loading bar.
 """
 #endregion

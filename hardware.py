@@ -3,6 +3,8 @@ import time
 import threading
 import queue
 import time
+import serial
+
 from decimal import Decimal, ROUND_HALF_UP
 
 import RPi.GPIO as GPIO
@@ -237,27 +239,32 @@ class RelayController:
         GPIO.cleanup()
 
 class MachineController:
+    """ def __init__(self):
+        self.relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8]) """
+
     def __init__(self):
-        self.relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
+        self.arduino = ArduinoController()
 
-    def dispense_cup(self, seconds):
-        print("Dispensing cup.")
-        self.relays.pulse(23, seconds)
+    def dispense_cup(self, seconds=2):
+        self.arduino.send("CUP", seconds)
 
-    def add_liquid(self, seconds):
-        print(f"Dispensing liquid for {seconds}s.")
-        self.relays.pulse(24, seconds)
+    def dispense_fruit(self, seconds=2):
+        self.arduino.send("FRUIT", seconds)
 
-    def dispense_fruit(self, seconds):
-        print(f"Dispensing fruit for {seconds}s.")
-        self.relays.pulse(27, seconds)
+    def add_liquid(self, seconds=2):
+        self.arduino.send("LIQUID", seconds)
 
-    def run_blender(self, seconds):
-        print(f"Blending for {seconds}s.")
-        self.relays.pulse(22, seconds)
+    def run_blender(self, seconds=2):
+        self.arduino.send("BLEND", seconds)
 
-    def cleanup(self):
-        self.relays.cleanup()
+class ArduinoController:
+    def __init__(self, port="/dev/ttyUSB0", baud=9600):
+        self.ser = serial.Serial(port, baud, timeout=1)
+
+    def send(self, command, seconds):
+        cmd = f"{command} {seconds}\n"
+        print(f"[ARDUINO SEND] {cmd.strip()}")
+        self.ser.write(cmd.encode())
 
 class HardwareManager:
     def __init__(self, app):
