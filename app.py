@@ -60,7 +60,7 @@ class App(tk.Tk):
         self.attributes('-fullscreen', True) # Enable for RPI
 
         # debug / logging
-        self.debug_mode = False
+        self.debug_mode = True
         self._debug_lines = []
         self.debug_widget = None
         self._main_thread_ident = threading.get_ident()
