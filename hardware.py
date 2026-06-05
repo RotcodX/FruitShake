@@ -244,17 +244,33 @@ class MachineController:
         print("Dispensing cup.")
         self.relays.pulse(23, seconds)
 
-    def add_liquid(self, seconds):
-        print(f"Dispensing liquid for {seconds}s.")
-        self.relays.pulse(24, seconds)
-
     def dispense_fruit(self, seconds):
         print(f"Dispensing fruit for {seconds}s.")
+        self.relays.pulse(24, seconds)
+
+    def dispense_ice(self, seconds):
+        print(f"Dispensing ice for {seconds}s.")
         self.relays.pulse(27, seconds)
+
+    def add_liquid(self, seconds):
+        print(f"Dispensing liquid for {seconds}s.")
+        self.relays.pulse(22, seconds)
+
+    def dispense_addons(self, seconds):
+        print(f"Dispensing Add-Ons for {seconds}s.")
+        self.relays.pulse(5, seconds)
 
     def run_blender(self, seconds):
         print(f"Blending for {seconds}s.")
-        self.relays.pulse(22, seconds)
+        self.relays.pulse(6, seconds)
+
+    def dispense_order(self, seconds):
+        print(f"Dispensing order for {seconds}s.")
+        self.relays.pulse(25, seconds)
+
+    def cleaning(self, seconds):
+        print(f"Cleaning up for {seconds}s.")
+        self.relays.pulse(8, seconds)
 
     def cleanup(self):
         self.relays.cleanup()
