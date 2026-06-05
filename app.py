@@ -57,7 +57,7 @@ class App(tk.Tk):
         self.title("Fruit Shake Vending Machine")
         self.geometry(f"{SCREEN_W}x{SCREEN_H}")
         self.resizable(False, False)
-        # self.attributes('-fullscreen', True) # Enable for RPI
+        self.attributes('-fullscreen', True) # Enable for RPI
 
         # debug / logging
         self.debug_mode = False

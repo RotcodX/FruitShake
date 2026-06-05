@@ -239,9 +239,6 @@ class RelayController:
         GPIO.cleanup()
 
 class MachineController:
-    """ def __init__(self):
-        self.relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8]) """
-
     def __init__(self):
         self.arduino = ArduinoController()
 
