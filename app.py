@@ -57,15 +57,16 @@ class App(tk.Tk):
         self.title("Fruit Shake Vending Machine")
         self.geometry(f"{SCREEN_W}x{SCREEN_H}")
         self.resizable(False, False)
-        self.attributes('-fullscreen', True) # Enable for RPI
+        self.after(500, self._apply_fullscreen)
 
         # debug / logging
-        self.debug_mode = True
+        self.debug_mode = False
         self._debug_lines = []
         self.debug_widget = None
         self._main_thread_ident = threading.get_ident()
         self.bind_all("<Key-d>", lambda e: self.toggle_debug())
         self.bind_all("<Key-D>", lambda e: self.toggle_debug())
+        self.bind("<Escape>", lambda e: self.attributes("-fullscreen", False))
 
         # Simple UI mode:
         # True  = use text-only loading/processing indicators
@@ -197,6 +198,16 @@ class App(tk.Tk):
         # Initiate Hardware
         if HARDWARE_AVAILABLE:
             self.after(1500, self._init_hardware_late)
+
+    def _apply_fullscreen(self):
+        try:
+            self.attributes("-fullscreen", True)
+        except Exception as e:
+            self.log(f"Fullscreen failed: {e}")
+            try:
+                self.state("zoomed")
+            except Exception:
+                pass
 
     def _init_hardware_late(self):
         try:

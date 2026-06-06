@@ -5,6 +5,9 @@ import uuid
 import os
 import tkinter.font as tkfont
 import threading
+import base64
+import io
+import requests
 
 from decimal import Decimal, ROUND_HALF_UP
 from PIL import Image, ImageTk
@@ -1249,19 +1252,12 @@ class PaypalMethodScreen(tk.Frame):
         self.bg_img = load_image_tk("5BPaypalMethodScreen.png", resize_to=(SCREEN_W, SCREEN_H))
         self.canvas.create_image(0, 0, anchor="nw", image=self.bg_img)
         self.canvas.bind("<Button-1>", lambda e: self.controller.touch_feedback.on_tap(self.canvas, e.x, e.y))
-        # QR placeholder
-        try:
-            self.qr_img = load_image_tk("QRCodePlaceholder.png", resize_to=(350, 350))
-            self.canvas.create_image(597, 174, anchor="nw", image=self.qr_img)
-        except Exception:
-            self.controller.log("QR image missing or load failed")
         # BACK BUTTON
         back_rect = self.canvas.create_rectangle(20, 520, 140, 580, outline="")
         self.canvas.tag_bind(
             back_rect,
             "<Button-1>",
-            lambda e: self.controller.log("Back on PayPal") or self.controller.show_frame(PaymentSelectionScreen, timeout_ms=self.controller.default_timeout_ms * 5)
-        )
+            lambda e: (self.cancel_paypal_poll(), self.controller.log("Back on PayPal"), self.controller.show_frame(PaymentSelectionScreen, timeout_ms=self.controller.default_timeout_ms * 5)))
         total = self.controller.calculate_total()
         # PRICE LABEL
         self.price_text_id = OutlinedText(
@@ -1277,36 +1273,180 @@ class PaypalMethodScreen(tk.Frame):
             pillow_font_path=FONT_INTER
         )
 
-        # PAY CONFIRM BUTTON
-        btn = tk.Button(self, text="I PAID", command=self.confirm_paid)
-        btn.place(x=950, y=550)
-        # SUMMARY BAR
-        self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
+        # PayPal state
+        self.paypal_order_id = None
+        self.paypal_poll_job = None
+        self.paypal_qr_photo = None
+        self.paypal_qr_item = None
+        self.paypal_flow_start_ts = None
+        self._paypal_last_log_ts = 0.0
+
+        # QR image holder
         try:
-            self.render_summary()
+            self.qr_img = load_image_tk("QRCodePlaceholder.png", resize_to=(350, 350))
+            self.paypal_qr_item = self.canvas.create_image(
+                597,
+                174,
+                anchor="nw",
+                image=self.qr_img
+            )
+        except Exception:
+            self.controller.log("QR image missing or load failed")
+
+        # status text
+        self.paypal_status_text = OutlinedText(
+            self.canvas,
+            SCREEN_W // 2,
+            535,
+            text="Generating PayPal QR...",
+            font=("Inter", 18),
+            fill="#00EEFF",
+            stroke=2,
+            stroke_fill="#0068DE",
+            mode="pillow",
+            anchor="center",
+            pillow_font_path=FONT_INTER,
+        )
+
+        # SummaryBar for this screen
+        self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
+
+    def _throttled_log(self, msg, interval=4.0):
+        now = time.monotonic()
+        if now - getattr(self, "_paypal_last_log_ts", 0.0) >= interval:
+            self._paypal_last_log_ts = now
+            self.controller.log(msg)
+
+    def start_paypal_flow(self):
+        try:
+            self.paypal_flow_start_ts = time.monotonic()
+            self.controller.log("PayPal UI: requesting order...")
+
+            total = self.controller.calculate_total()
+
+            self.paypal_status_text.update(
+                text="Generating PayPal QR..."
+            )
+
+            response = requests.post(
+                "http://127.0.0.1:3000/api/paypal/orders",
+                json={
+                    "amount": f"{total:.2f}",
+                    "currency": "PHP",
+                    "referenceId": "THESIS-TEST",
+                    "description": "Fruit Shake Order"
+                },
+                timeout=30
+            )
+
+            data = response.json()
+
+            self.controller.log(f"PayPal UI: backend responded in {time.monotonic() - self.paypal_flow_start_ts:.1f}s")
+
+            self.paypal_order_id = data["orderId"]
+
+            self._show_paypal_qr(data["qrDataUrl"])
+
+            self.paypal_status_text.update(
+                text="Scan QR to Pay"
+            )
+
+            self._poll_paypal_status()
+
         except Exception as e:
-            self.controller.log(f"PaypalMethodScreen: render_summary failed at init: {e}")
+            self.controller.log(f"PayPal start error: {e}")
 
-    def confirm_paid(self):
-        if self.controller.busy:
-            return
+            self.paypal_status_text.update(
+                text="Unable to generate QR"
+            )
 
-        self.controller.log("I PAID pressed (Paypal) — recording sale and proceeding to Processing")
+    def _show_paypal_qr(self, qr_data_url):
+        try:
+            header, b64data = qr_data_url.split(",", 1)
+            raw = base64.b64decode(b64data)
+
+            img = Image.open(io.BytesIO(raw)).convert("RGBA")
+
+            img = img.resize((350, 350), Image.LANCZOS)
+
+            self.paypal_qr_photo = ImageTk.PhotoImage(img)
+
+            self.canvas.itemconfigure(
+                self.paypal_qr_item,
+                image=self.paypal_qr_photo
+            )
+
+        except Exception as e:
+            self.controller.log(f"PayPal QR display error: {e}")
+
+    def _poll_paypal_status(self):
+        try:
+            self._throttled_log("PayPal UI: waiting for payment...", interval=4.0)
+            if not self.paypal_order_id:
+                return
+
+            response = requests.get(
+                f"http://127.0.0.1:3000/api/paypal/status/{self.paypal_order_id}",
+                timeout=10
+            )
+
+            data = response.json()
+
+            status = data.get("status")
+
+            if status == "COMPLETED":
+                self._finish_paypal_payment()
+                return
+
+            if status == "DENIED":
+                self.paypal_status_text.update(
+                    text="Payment Failed"
+                )
+                return
+
+        except Exception as e:
+            self.controller.log(f"PayPal poll error: {e}")
+
+        self.paypal_poll_job = self.after(
+            2000,
+            self._poll_paypal_status
+        )
+
+    def _finish_paypal_payment(self):
+        elapsed = time.monotonic() - self.paypal_flow_start_ts if self.paypal_flow_start_ts else 0
+        self.controller.log(f"PayPal payment completed in {elapsed:.1f}s")
+        
+        if self.paypal_poll_job:
+            self.after_cancel(self.paypal_poll_job)
+            self.paypal_poll_job = None
+
+        self.paypal_status_text.update(
+            text="Payment Received"
+        )
+
         self.controller.payment_method = "PayPal"
-        self.controller.show_loading_gif(self.canvas)
 
         def _on_success():
-            self.controller.hide_loading_gif()
-            self.controller.show_frame(ProcessingScreen, pause=True, skip_error_check=True)
+            self.controller.show_frame(
+                ProcessingScreen,
+                pause=True,
+                skip_error_check=True
+            )
 
         def _on_error(err):
-            self.controller.hide_loading_gif()
-            self.controller.log(f"PaypalMethod: sale failed: {err}")
+            self.controller.show_error(
+                f"Failed to record sale: {err}"
+            )
 
         self.controller.start_sale_recording(
             on_success=_on_success,
-            on_error=_on_error,
+            on_error=_on_error
         )
+
+    def cancel_paypal_poll(self):
+        if self.paypal_poll_job:
+            self.after_cancel(self.paypal_poll_job)
+            self.paypal_poll_job = None
 
     def render_summary(self):
         parts = []
@@ -1327,6 +1467,8 @@ class PaypalMethodScreen(tk.Frame):
             except Exception as e:
                 self.controller.log(f"PaypalMethodScreen: failed to update price_text_id: {e}")
             self.render_summary()
+            self.cancel_paypal_poll()
+            self.start_paypal_flow()
         except Exception as e:
             self.controller.log(f"PaypalMethodScreen: tkraise error: {e}")
 

@@ -171,6 +171,10 @@ def paypal_webhook():
     try:
         webhook_event = request.get_json(force=True, silent=False)
 
+        print("WEBHOOK EVENT TYPE:", webhook_event.get("event_type"))
+        print("WEBHOOK RESOURCE ID:", webhook_event.get("resource", {}).get("id"))
+        print("RAW WEBHOOK:", webhook_event)
+
         # Verify webhook signature with PayPal's verify endpoint.
         verification_payload = {
             "transmission_id": request.headers.get("PAYPAL-TRANSMISSION-ID"),
@@ -205,6 +209,9 @@ def paypal_webhook():
             PROCESSED_WEBHOOK_IDS.add(webhook_id)
 
         event_type = webhook_event.get("event_type")
+        print("=" * 60)
+        print("EVENT:", event_type)
+        print("=" * 60)
         resource = webhook_event.get("resource") or {}
         resource_id = resource.get("id")
 
@@ -227,6 +234,9 @@ def paypal_webhook():
             )
             capture_resp.raise_for_status()
             capture_data = capture_resp.json()
+            print("CAPTURE RESPONSE:")
+            print(capture_data)
+            print("CAPTURE STATUS:", capture_data.get("status"))
 
             ORDERS.setdefault(resource_id, {})
             ORDERS[resource_id]["status"] = capture_data.get("status", "COMPLETED")
@@ -283,6 +293,24 @@ def get_order(order_id: str):
             }
         ), 500
 
+@app.get("/api/paypal/status/<order_id>")
+def get_order_status(order_id):
+    order = ORDERS.get(order_id)
+
+    if not order:
+        return jsonify({"error": "order_not_found"}), 404
+
+    return jsonify({
+        "orderId": order_id,
+        "status": order.get("status"),
+        "lastWebhookEvent": order.get("lastWebhookEvent"),
+    })
+
+""" 
+@app.get("/api/debug/orders")
+def debug_orders():
+    return jsonify(ORDERS)
+"""
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000, debug=True)
