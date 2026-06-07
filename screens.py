@@ -1318,16 +1318,12 @@ class PaypalMethodScreen(tk.Frame):
             self.controller.log(msg)
 
     def start_paypal_flow(self):
+        self.controller.show_loading_gif(self.canvas)
         try:
             self.paypal_flow_start_ts = time.monotonic()
             self.controller.log("PayPal UI: requesting order...")
 
             total = self.controller.calculate_total()
-
-            self.paypal_status_text.update(
-                text="Generating PayPal QR..."
-            )
-
             response = requests.post(
                 "http://127.0.0.1:3000/api/paypal/orders",
                 json={
@@ -1340,25 +1336,17 @@ class PaypalMethodScreen(tk.Frame):
             )
 
             data = response.json()
-
-            self.controller.log(f"PayPal UI: backend responded in {time.monotonic() - self.paypal_flow_start_ts:.1f}s")
-
             self.paypal_order_id = data["orderId"]
-
             self._show_paypal_qr(data["qrDataUrl"])
 
-            self.paypal_status_text.update(
-                text="Scan QR to Pay"
-            )
-
+            self.controller.hide_loading_gif()
+            self.paypal_status_text.update(text="Scan QR to Pay")
             self._poll_paypal_status()
 
         except Exception as e:
+            self.controller.hide_loading_gif()
             self.controller.log(f"PayPal start error: {e}")
-
-            self.paypal_status_text.update(
-                text="Unable to generate QR"
-            )
+            self.paypal_status_text.update(text="Unable to generate QR")
 
     def _show_paypal_qr(self, qr_data_url):
         try:

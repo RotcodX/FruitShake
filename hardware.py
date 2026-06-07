@@ -106,17 +106,12 @@ class MoneyPulseAcceptor:
 
             if self.pulse_count == 0:
                 self.first_pulse_time = now
-                print(f"{self.name}: signal detected")   # ✅ SAFE
+                print(f"{self.name}: signal detected")
 
             self.pulse_count += 1
             self.last_pulse_time = now
             self.last_interrupt_time = now
             self.pulse_active = True
-
-            # LIMITED debug (every X seconds only)
-            if now - self.last_debug_log >= self.debug_cooldown:
-                print(f"{self.name}: pulses={self.pulse_count}")
-                self.last_debug_log = now
 
     def _debug_status(self, now):
         if now - self.last_status_log < self.debug_status_interval:
@@ -143,7 +138,7 @@ class MoneyPulseAcceptor:
     def _poll_finalize(self):
         now = time.monotonic()
 
-        # self._debug_status(now)
+        self._debug_status(now)
 
         with self.lock:
             pulse_active = self.pulse_active
@@ -291,7 +286,7 @@ class HardwareManager:
             bouncetime=5,
             decoder=decode_coin,
             accept_one_pulse=False,  # keep False until ₱1 is stable
-            debug_cooldown=0.5,
+            debug_cooldown=5,
             process_delay=0.2,
             shared_processing_lock=self.money_processing_lock,
         )
@@ -305,7 +300,7 @@ class HardwareManager:
             bouncetime=15,
             decoder=decode_bill,
             accept_one_pulse=False,
-            debug_cooldown=0.5,
+            debug_cooldown=5,
             process_delay=0.5,
             shared_processing_lock=self.money_processing_lock,
         )
