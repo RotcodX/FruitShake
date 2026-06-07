@@ -83,15 +83,11 @@ class MoneyPulseAcceptor:
     def _shared_processing_active(self):
         if self.shared_processing_lock is None:
             return False
-        if not self.shared_processing_lock.get("active", False):
-            return False
-        owner = self.shared_processing_lock.get("owner")
-        return owner not in (None, self.name)
+        return bool(self.shared_processing_lock.get("active", False))
 
     def _set_shared_processing(self, active):
         if self.shared_processing_lock is not None:
             self.shared_processing_lock["active"] = bool(active)
-            self.shared_processing_lock["owner"] = self.name if active else None
 
     def _on_pulse(self, channel):
         now = time.monotonic()
@@ -201,9 +197,9 @@ class MoneyPulseAcceptor:
 def decode_coin(pulses):
     if 1 <= pulses <= 3:
         return 0 # 1 peso coin pulses are ignored and just adds nothing to payment
-    if 4 <= pulses <= 7:
+    if 4 <= pulses <= 8:
         return 5
-    if 8 <= pulses <= 13:
+    if 9 <= pulses <= 13:
         return 10
     return 0
 
