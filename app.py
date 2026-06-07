@@ -7,6 +7,7 @@ import tkinter as tk
 import queue
 import threading
 import requests
+import socket
 
 from PIL import Image, ImageTk
 from dotenv import load_dotenv
@@ -213,7 +214,7 @@ class App(tk.Tk):
         try:
             self.log("Initializing hardware...")
             self.hardware = HardwareManager(self)
-            self.machine = MachineController()
+            self.machine = MachineController(self.hardware)
             self.log("Hardware initialized.")
         except Exception as e:
             self.log(f"Hardware init failed: {e}")
@@ -1182,6 +1183,15 @@ class App(tk.Tk):
             return True
         except Exception as e:
             self.log(f"Supabase not available: {e}")
+            return False
+        
+    def has_internet(self, timeout=2.5):
+        try:
+            socket.setdefaulttimeout(timeout)
+            socket.create_connection(("1.1.1.1", 53))
+            return True
+        except Exception as e:
+            self.log(f"Internet check failed: {e}")
             return False
         
     def load_from_local_db(self):

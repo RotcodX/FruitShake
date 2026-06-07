@@ -238,7 +238,8 @@ class RelayController:
         GPIO.cleanup()
 
 class MachineController:
-    def __init__(self):
+    def __init__(self, hardware):
+        self.hardware = hardware
         self.relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
 
     def dispense_cup(self, seconds):
@@ -255,19 +256,35 @@ class MachineController:
 
     def add_liquid(self, seconds):
         print(f"Dispensing liquid for {seconds}s.")
-        self.relays.pulse(22, seconds)
+        self.run_servo_for_time(
+                relay_pin=22,
+                servo=self.hardware.servo1,
+                seconds=seconds
+            )
 
     def dispense_addons(self, seconds):
         print(f"Dispensing Add-Ons for {seconds}s.")
-        self.relays.pulse(5, seconds)
+        self.run_servo_for_time(
+            relay_pin=5,
+            servo=self.hardware.servo2,
+            seconds=seconds
+        )
 
     def run_blender(self, seconds):
         print(f"Blending for {seconds}s.")
-        self.relays.pulse(6, seconds)
+        self.run_servo_for_time(
+            relay_pin=6,
+            servo=self.hardware.servo3,
+            seconds=seconds
+        )
 
     def dispense_order(self, seconds):
         print(f"Dispensing order for {seconds}s.")
-        self.relays.pulse(25, seconds)
+        self.run_servo_for_time(
+            relay_pin=25,
+            servo=self.hardware.servo4,
+            seconds=seconds
+        )
 
     def cleaning(self, seconds):
         print(f"Cleaning up for {seconds}s.")
@@ -275,6 +292,16 @@ class MachineController:
 
     def cleanup(self):
         self.relays.cleanup()
+
+    def run_servo_for_time(self, relay_pin, servo, seconds):
+        GPIO.output(relay_pin, GPIO.LOW)
+
+        time.sleep(0.5)
+        servo.value = 1
+        time.sleep(seconds)
+        servo.value = 0
+
+        GPIO.output(relay_pin, GPIO.HIGH)
 
 class HardwareManager:
     def __init__(self, app):
@@ -311,5 +338,8 @@ class HardwareManager:
             shared_processing_lock=self.money_processing_lock,
         )
 
-        # outputs
-        self.servo = None
+        # Servo
+        self.servo1 = Servo(12)
+        self.servo2 = Servo(13)
+        self.servo3 = Servo(19)
+        self.servo4 = Servo(26)

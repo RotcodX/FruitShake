@@ -879,6 +879,10 @@ class PaymentSelectionScreen(tk.Frame):
         self.canvas.tag_bind(self.back_rect, "<Button-1>", lambda e: self.controller.log("Back on PaymentSelection") or self.controller.show_frame(SummaryScreen, timeout_ms=self.controller.default_timeout_ms * 5))
 
         # --- OFFLINE PAYPAL OVERLAY (cropped, fixed position) ---
+        self.is_online = False
+        self._online_check_in_flight = False
+        self._last_online_check_ts = 0.0
+        self._last_online_result = False
         self.offline_paypal_img = load_image_tk("offlinePayPal.png")
         self.offline_paypal_item = self.canvas.create_image(574, 147, anchor="nw", image=self.offline_paypal_img)
         # hidden by default
@@ -894,7 +898,7 @@ class PaymentSelectionScreen(tk.Frame):
         self.render_summary()
 
     def _on_paypal_click(self, event=None):
-        if not self.controller.is_supabase_available():
+        if not getattr(self, "is_online", False):
             self.controller.log("PayPal blocked: offline mode")
             return
 
@@ -905,11 +909,25 @@ class PaymentSelectionScreen(tk.Frame):
         )
 
     def update_online_state(self):
-        if not self.controller.is_supabase_available():
+        if not self.is_online:
             self.canvas.itemconfigure(self.offline_paypal_item, state="normal")
             self.controller.log("PaymentSelection: OFFLINE - PayPal disabled")
         else:
             self.canvas.itemconfigure(self.offline_paypal_item, state="hidden")
+
+    def _after_online_check(self, err, result):
+        self._online_check_in_flight = False
+        self.controller.hide_loading_gif()
+
+        online = bool(result) and err is None
+        self._last_online_check_ts = time.monotonic()
+        self._last_online_result = online
+        self.is_online = online
+
+        try:
+            self.update_online_state()
+        except Exception as e:
+            self.controller.log(f"PaymentSelectionScreen: online state update failed: {e}")
 
     def render_summary(self):
         parts = []
@@ -923,10 +941,25 @@ class PaymentSelectionScreen(tk.Frame):
 
     def tkraise(self, *args, **kwargs):
         super().tkraise(*args, **kwargs)
-        # refresh summary when screen becomes visible
         try:
             self.render_summary()
-            self.update_online_state()
+
+            now = time.monotonic()
+            if self._online_check_in_flight:
+                return
+
+            # reuse recent result for 15 seconds
+            if now - self._last_online_check_ts < 15:
+                self.is_online = self._last_online_result
+                self.update_online_state()
+                return
+
+            self._online_check_in_flight = True
+            self.controller.show_loading_gif(self.canvas)
+            self.controller.run_async(
+                self.controller.has_internet,
+                on_done=self._after_online_check
+            )
         except Exception as e:
             self.controller.log(f"PaymentSelectionScreen: tkraise render_summary failed: {e}")
 
@@ -1320,6 +1353,9 @@ class PaypalMethodScreen(tk.Frame):
             self.controller.log("PayPal UI: requesting order...")
 
             total = self.controller.calculate_total()
+
+            self.paypal_status_text.update(text="Generating PayPal QR.")
+
             response = requests.post(
                 "http://127.0.0.1:3000/api/paypal/orders",
                 json={
@@ -1335,8 +1371,8 @@ class PaypalMethodScreen(tk.Frame):
             self.paypal_order_id = data["orderId"]
             self._show_paypal_qr(data["qrDataUrl"])
 
-            self.controller.hide_loading_gif()
             self.paypal_status_text.update(text="Scan QR to Pay")
+            self.controller.hide_loading_gif()
             self._poll_paypal_status()
 
         except Exception as e:
@@ -1365,7 +1401,7 @@ class PaypalMethodScreen(tk.Frame):
 
     def _poll_paypal_status(self):
         try:
-            self._throttled_log("PayPal UI: waiting for payment...", interval=4.0)
+            self._throttled_log("PayPal UI: waiting for payment...", interval=10.0)
             if not self.paypal_order_id:
                 return
 
@@ -2008,27 +2044,27 @@ class ProcessingScreen(tk.Frame):
 
             # simple placeholder liquid time
             self.controller.log("Machine worker: add_liquid start")
-            machine.add_liquid(2)
+            machine.add_liquid(3)
             self.controller.log("Machine worker: add_liquid done")
 
             # simple placeholder add ons time
             self.controller.log("Machine worker: dispense_addons start")
-            machine.dispense_addons(2)
+            machine.dispense_addons(4)
             self.controller.log("Machine worker: dispense_addons done")
 
             # blender
             self.controller.log("Machine worker: run_blender start")
-            machine.run_blender(5)
+            machine.run_blender(4)
             self.controller.log("Machine worker: run_blender done")
 
             # order dispense
             self.controller.log("Machine worker: dispense_order start")
-            machine.dispense_order(2)
+            machine.dispense_order(6)
             self.controller.log("Machine worker: dispense_order done")
 
             # simple placeholder cleaning time
             self.controller.log("Machine worker: cleaning start")
-            machine.cleaning(5)
+            machine.cleaning(3)
             self.controller.log("Machine worker: cleaning done")
 
             self.controller.after(0, self._mark_machine_done)

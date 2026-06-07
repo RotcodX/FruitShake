@@ -19,7 +19,6 @@ Virtual Environment:
 Previously: Shift + Alt + P -> Select Interpreter -> Enter interpreter path -> Select the venv manually from folders
 Try: source ~/venv-rpi/bin/activate
 
-
 Variable Information:
 app.py:
 - self.simpleUI = True # for simple display UI instead of showing loading screen GIF and procressing screen loading bar.
@@ -31,5 +30,10 @@ PayPal:
 - Add 2 Terminals
 - Terminal 1: ngrok http 3000
 - Terminal 2: python paypal_backend.py
+
+Used GPIO Pins:
+- GPIO 17: Coin Acceptor
+- GPIO 18: Bill Acceptor
+- GPIO 5, 6, 8, 22, 23, 24, 25, 27
 """
 #endregion
