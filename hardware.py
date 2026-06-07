@@ -49,7 +49,7 @@ class MoneyPulseAcceptor:
         self.first_pulse_time = 0.0
         self.processing_until = 0.0
 
-        self.debug_status_interval = 5.0
+        self.debug_status_interval = 10.0
         self.last_status_log = 0.0
 
         self.lock = threading.Lock()
@@ -83,11 +83,15 @@ class MoneyPulseAcceptor:
     def _shared_processing_active(self):
         if self.shared_processing_lock is None:
             return False
-        return bool(self.shared_processing_lock.get("active", False))
+        if not self.shared_processing_lock.get("active", False):
+            return False
+        owner = self.shared_processing_lock.get("owner")
+        return owner not in (None, self.name)
 
     def _set_shared_processing(self, active):
         if self.shared_processing_lock is not None:
             self.shared_processing_lock["active"] = bool(active)
+            self.shared_processing_lock["owner"] = self.name if active else None
 
     def _on_pulse(self, channel):
         now = time.monotonic()
@@ -106,6 +110,8 @@ class MoneyPulseAcceptor:
 
             if self.pulse_count == 0:
                 self.first_pulse_time = now
+                self._set_shared_processing(True)
+                self.app.after(0, lambda: self.app.set_cash_indicator(True))
                 print(f"{self.name}: signal detected")
 
             self.pulse_count += 1
@@ -156,8 +162,6 @@ class MoneyPulseAcceptor:
             self.app.after(100, self._poll_finalize)
             return
 
-        self._set_shared_processing(True)
-
         with self.lock:
             pulses = self.pulse_count
             self.pulse_count = 0
@@ -175,9 +179,11 @@ class MoneyPulseAcceptor:
         if value > 0:
             if pulses == 1 and not self.accept_one_pulse:
                 print(f"{self.name}: rejected 1-pulse value for stability")
+                self.app.after(0, lambda: self.app.set_cash_indicator(False))
             else:
                 print(f"{self.name}: {pulses} pulse(s) -> ₱{value}")
                 self.app.queue_cash(value)
+                self.app.after(0, lambda: self.app.set_cash_indicator(False))
         else:
             print(f"{self.name}: invalid pulse count {pulses}, ignored")
 
@@ -197,11 +203,11 @@ def decode_coin(pulses):
     return 0
 
 def decode_bill(pulses):
-    if 15 <= pulses <= 35:
+    if 15 <= pulses <= 40:
         return 20
-    if 36 <= pulses <= 80:
+    if 41 <= pulses <= 100:
         return 50
-    if 81 <= pulses <= 170:
+    if 101 <= pulses <= 240:
         return 100
     return 0
 
@@ -275,7 +281,7 @@ class HardwareManager:
         self.app = app
 
         # Shared lock so coin and bill do not process at the exact same time.
-        self.money_processing_lock = {"active": False}
+        self.money_processing_lock = {"active": False, "owner": None}
 
         self.coin_acceptor = MoneyPulseAcceptor(
             app,
@@ -286,7 +292,7 @@ class HardwareManager:
             bouncetime=5,
             decoder=decode_coin,
             accept_one_pulse=False,  # keep False until ₱1 is stable
-            debug_cooldown=5,
+            debug_cooldown=10,
             process_delay=0.2,
             shared_processing_lock=self.money_processing_lock,
         )
@@ -300,7 +306,7 @@ class HardwareManager:
             bouncetime=15,
             decoder=decode_bill,
             accept_one_pulse=False,
-            debug_cooldown=5,
+            debug_cooldown=10,
             process_delay=0.5,
             shared_processing_lock=self.money_processing_lock,
         )

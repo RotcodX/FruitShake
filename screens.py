@@ -1148,11 +1148,7 @@ class CashMethodScreen(tk.Frame):
     # -------------------------
     def add_cash(self, amount):
         """Called to add money from hardware or admin simulator."""
-        self.show_indicator()
         self.controller.log(f"CashMethod.add_cash called with amount={amount}")
-        if hasattr(self, "_indicator_after_id"):
-            self.after_cancel(self._indicator_after_id)
-        self._indicator_after_id = self.after(1500, self.hide_indicator)
         if not getattr(self.controller, "accept_cash_input", False):
             self.controller.log(f"CashMethod.add_cash ignored ₱{amount}: cash input disabled")
             return

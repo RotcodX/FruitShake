@@ -1031,6 +1031,18 @@ class App(tk.Tk):
 
         self.after(50, self._poll_cash_queue)
 
+    def set_cash_indicator(self, visible):
+        frame = self.frames.get(CashMethodScreen)
+        if not frame:
+            return
+        try:
+            if visible:
+                frame.show_indicator()
+            else:
+                frame.hide_indicator()
+        except Exception as e:
+            self.log(f"set_cash_indicator failed: {e}")
+
     def show_loading_gif(self, canvas):
         self.busy = True
         self.pause_inactivity()
