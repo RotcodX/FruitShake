@@ -257,35 +257,18 @@ class MachineController:
 
     def add_liquid(self, seconds):
         print(f"Dispensing liquid for {seconds}s.")
-        self.run_servo_for_time(
-                relay_pin=22,
-                servo=self.hardware.servo1,
-                seconds=seconds
-            )
+        self.run_servo_for_time(self.hardware.servo1, seconds, direction=1)
 
     def dispense_addons(self, seconds):
         print(f"Dispensing Add-Ons for {seconds}s.")
-        self.run_servo_for_time(
-            relay_pin=5,
-            servo=self.hardware.servo2,
-            seconds=seconds
-        )
+        self.run_servo_for_time(self.hardware.servo2, seconds, direction=1)
 
     def run_blender(self, seconds):
         print(f"Blending for {seconds}s.")
-        self.run_servo_for_time(
-            relay_pin=6,
-            servo=self.hardware.servo3,
-            seconds=seconds
-        )
+        self.run_servo_for_time(self.hardware.servo3, seconds, direction=1)
 
     def dispense_order(self, seconds):
-        print(f"Dispensing order for {seconds}s.")
-        self.run_servo_for_time(
-            relay_pin=25,
-            servo=self.hardware.servo4,
-            seconds=seconds
-        )
+        self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
 
     def cleaning(self, seconds):
         print(f"Cleaning up for {seconds}s.")
@@ -294,15 +277,12 @@ class MachineController:
     def cleanup(self):
         self.relays.cleanup()
 
-    def run_servo_for_time(self, relay_pin, servo, seconds):
-        GPIO.output(relay_pin, GPIO.LOW)
-
-        time.sleep(0.5)
-        servo.value = 1
+    def run_servo_for_time(self, servo, seconds, direction=1):
+        servo.value = 0
+        time.sleep(0.2)
+        servo.value = direction
         time.sleep(seconds)
         servo.value = 0
-
-        GPIO.output(relay_pin, GPIO.HIGH)
 
 class HardwareManager:
     def __init__(self, app):
