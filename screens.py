@@ -903,10 +903,7 @@ class PaymentSelectionScreen(tk.Frame):
             return
 
         self.controller.log("PayPal selected")
-        self.controller.show_frame(
-            PaypalMethodScreen,
-            timeout_ms=self.controller.default_timeout_ms * 10
-        )
+        self.controller.show_frame(PaypalMethodScreen, timeout_ms=self.controller.default_timeout_ms * 10)
 
     def update_online_state(self):
         if not self.is_online:
@@ -1348,36 +1345,47 @@ class PaypalMethodScreen(tk.Frame):
 
     def start_paypal_flow(self):
         self.controller.show_loading_gif(self.canvas)
+        self.paypal_status_text.update(text="Generating PayPal QR.")
+        self.paypal_flow_start_ts = time.monotonic()
+        self.controller.log("PayPal UI: requesting order...")
+
+        # run the slow request in the background, like PaymentSelectionScreen does
+        self.controller.run_async(self._create_paypal_order, on_done=self._after_paypal_order)
+
+    def _create_paypal_order(self):
+        total = self.controller.calculate_total()
+
+        response = requests.post(
+            "http://127.0.0.1:3000/api/paypal/orders",
+            json={
+                "amount": f"{total:.2f}",
+                "currency": "PHP",
+                "referenceId": "THESIS-TEST",
+                "description": "Fruit Shake Order",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _after_paypal_order(self, err, data):
+        self.controller.hide_loading_gif()
+
+        if err:
+            self.controller.log(f"PayPal start error: {err}")
+            self.paypal_status_text.update(text="Unable to generate QR")
+            return
+
         try:
-            self.paypal_flow_start_ts = time.monotonic()
-            self.controller.log("PayPal UI: requesting order...")
-
-            total = self.controller.calculate_total()
-
-            self.paypal_status_text.update(text="Generating PayPal QR.")
-
-            response = requests.post(
-                "http://127.0.0.1:3000/api/paypal/orders",
-                json={
-                    "amount": f"{total:.2f}",
-                    "currency": "PHP",
-                    "referenceId": "THESIS-TEST",
-                    "description": "Fruit Shake Order"
-                },
-                timeout=30
-            )
-
-            data = response.json()
             self.paypal_order_id = data["orderId"]
             self._show_paypal_qr(data["qrDataUrl"])
-
             self.paypal_status_text.update(text="Scan QR to Pay")
-            self.controller.hide_loading_gif()
             self._poll_paypal_status()
-
+            self.controller.log(
+                f"PayPal UI: backend responded in {time.monotonic() - self.paypal_flow_start_ts:.1f}s"
+            )
         except Exception as e:
-            self.controller.hide_loading_gif()
-            self.controller.log(f"PayPal start error: {e}")
+            self.controller.log(f"PayPal order handling error: {e}")
             self.paypal_status_text.update(text="Unable to generate QR")
 
     def _show_paypal_qr(self, qr_data_url):
