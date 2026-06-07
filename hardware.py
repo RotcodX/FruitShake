@@ -243,6 +243,11 @@ class MachineController:
         self.hardware = hardware
         self.relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
 
+        # Servo tuning
+        self.servo_run_value = 1.0
+        self.servo_stop_value = 0.02
+        self.servo_settle_time = 0.2
+
     def dispense_cup(self, seconds):
         print("Dispensing cup.")
         self.relays.pulse(23, seconds)
@@ -277,12 +282,19 @@ class MachineController:
     def cleanup(self):
         self.relays.cleanup()
 
-    def run_servo_for_time(self, servo, seconds, direction=1):
-        servo.value = 0
-        time.sleep(0.2)
+    def run_servo_for_time(self, servo, seconds, direction=None):
+        if direction is None:
+            direction = self.servo_run_value
+
+        # force stop first
+        servo.value = self.servo_stop_value
+        time.sleep(self.servo_settle_time)
+        # run
         servo.value = direction
         time.sleep(seconds)
-        servo.value = 0
+        # stop again
+        servo.value = self.servo_stop_value
+        time.sleep(self.servo_settle_time)
 
 class HardwareManager:
     def __init__(self, app):
