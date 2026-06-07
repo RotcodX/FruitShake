@@ -111,7 +111,6 @@ class MoneyPulseAcceptor:
 
             if self.pulse_count == 0:
                 self.first_pulse_time = now
-                self._set_shared_processing(True)
                 self.app.after(0, lambda: self.app.set_cash_indicator(True))
                 print(f"{self.name}: signal detected")
 
@@ -156,12 +155,13 @@ class MoneyPulseAcceptor:
             pulse_active
             and last_time
             and (now - last_time) > self.timeout
-            and not self._shared_processing_active()
         )
 
         if not should_finalize:
             self.app.after(100, self._poll_finalize)
             return
+        
+        self._set_shared_processing(True)
 
         with self.lock:
             pulses = self.pulse_count
@@ -309,7 +309,7 @@ class HardwareManager:
         self.app = app
 
         # Shared lock so coin and bill do not process at the exact same time.
-        self.money_processing_lock = {"active": False, "owner": None}
+        self.money_processing_lock = {"active": False}
 
         self.coin_acceptor = MoneyPulseAcceptor(
             app,
