@@ -49,7 +49,7 @@ class MoneyPulseAcceptor:
         self.first_pulse_time = 0.0
         self.processing_until = 0.0
 
-        self.debug_status_interval = 10.0
+        self.debug_status_interval = 5.0
         self.last_status_log = 0.0
 
         self.lock = threading.Lock()
@@ -95,6 +95,11 @@ class MoneyPulseAcceptor:
 
     def _on_pulse(self, channel):
         now = time.monotonic()
+
+        print(
+            f"{self.name}: RAW pulse GPIO={self.pin} "
+            f"time={now:.3f}"
+        )
 
         # Ignore pulses while another acceptor is being processed.
         if self._shared_processing_active():
@@ -319,7 +324,7 @@ class HardwareManager:
             bouncetime=5,
             decoder=decode_coin,
             accept_one_pulse=False,  # keep False until ₱1 is stable
-            debug_cooldown=10,
+            debug_cooldown=5,
             process_delay=0.2,
             shared_processing_lock=self.money_processing_lock,
         )
@@ -333,7 +338,7 @@ class HardwareManager:
             bouncetime=15,
             decoder=decode_bill,
             accept_one_pulse=False,
-            debug_cooldown=10,
+            debug_cooldown=5,
             process_delay=0.5,
             shared_processing_lock=self.money_processing_lock,
         )
