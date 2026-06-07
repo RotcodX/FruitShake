@@ -324,3 +324,8 @@ class HardwareManager:
         self.servo2 = Servo(13)
         self.servo3 = Servo(19)
         self.servo4 = Servo(26)
+
+        self.servo1.value = 0
+        self.servo2.value = 0
+        self.servo3.value = 0
+        self.servo4.value = 0
