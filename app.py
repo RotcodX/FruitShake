@@ -57,7 +57,7 @@ class App(tk.Tk):
         self.title("Fruit Shake Vending Machine")
         self.geometry(f"{SCREEN_W}x{SCREEN_H}")
         self.resizable(False, False)
-        self.after(500, self._apply_fullscreen)
+        self.after(2000, self._apply_fullscreen)
 
         # debug / logging
         self.debug_mode = False

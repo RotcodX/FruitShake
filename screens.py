@@ -2008,7 +2008,7 @@ class ProcessingScreen(tk.Frame):
 
             # Example sequence — adjust timings later
             self.controller.log("Machine worker: dispense_cup start")
-            machine.dispense_cup(5)
+            machine.dispense_cup(2)
             self.controller.log("Machine worker: dispense_cup done")
 
             # simple placeholder fruit dispense time based on number of fruits
@@ -2019,32 +2019,32 @@ class ProcessingScreen(tk.Frame):
 
             # simple placeholder ice dispense time
             self.controller.log("Machine worker: dispense_ice start")
-            machine.dispense_ice(5)
+            machine.dispense_ice(2)
             self.controller.log("Machine worker: dispense_ice done")
 
             # simple placeholder liquid time
             self.controller.log("Machine worker: add_liquid start")
-            machine.add_liquid(5)
+            machine.add_liquid(2)
             self.controller.log("Machine worker: add_liquid done")
 
             # simple placeholder add ons time
             self.controller.log("Machine worker: dispense_addons start")
-            machine.dispense_addons(5)
+            machine.dispense_addons(2)
             self.controller.log("Machine worker: dispense_addons done")
 
             # blender
             self.controller.log("Machine worker: run_blender start")
-            machine.run_blender(10)
+            machine.run_blender(5)
             self.controller.log("Machine worker: run_blender done")
 
             # order dispense
             self.controller.log("Machine worker: dispense_order start")
-            machine.dispense_order(5)
+            machine.dispense_order(2)
             self.controller.log("Machine worker: dispense_order done")
 
             # simple placeholder cleaning time
             self.controller.log("Machine worker: cleaning start")
-            machine.cleaning(15)
+            machine.cleaning(5)
             self.controller.log("Machine worker: cleaning done")
 
             self.controller.after(0, self._mark_machine_done)
