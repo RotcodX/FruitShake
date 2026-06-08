@@ -314,7 +314,7 @@ class HardwareManager:
             accept_one_pulse=False,  # keep False until ₱1 is stable
             debug_cooldown=5,
             process_delay=0.2,
-            shared_processing_lock=None,
+            shared_processing_lock=self.money_processing_lock,
         )
 
         self.bill_acceptor = MoneyPulseAcceptor(
@@ -328,14 +328,26 @@ class HardwareManager:
             accept_one_pulse=False,
             debug_cooldown=5,
             process_delay=0.5,
-            shared_processing_lock=None,
+            shared_processing_lock=self.money_processing_lock,
         )
 
         # Servo
-        self.servo1 = Servo(12)
-        self.servo2 = Servo(13)
-        self.servo3 = Servo(19)
-        self.servo4 = Servo(26)
+        self.servo1 = Servo(12,
+            min_pulse_width=0.001,
+            max_pulse_width=0.002
+        )
+        self.servo2 = Servo(13,
+            min_pulse_width=0.001,
+            max_pulse_width=0.002
+        )
+        self.servo3 = Servo(19,
+            min_pulse_width=0.001,
+            max_pulse_width=0.002
+        )
+        self.servo4 = Servo(26,
+            min_pulse_width=0.001,
+            max_pulse_width=0.002
+        )
 
         self.servo1.value = 0
         self.servo2.value = 0
