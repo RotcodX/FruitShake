@@ -874,7 +874,7 @@ class PaymentSelectionScreen(tk.Frame):
         self.cash_rect = self.canvas.create_rectangle(102, 147, 452, 468, outline="")
         self.pay_rect = self.canvas.create_rectangle(578, 147, 928, 468, outline="")
         self.canvas.tag_bind(self.cash_rect, "<Button-1>", lambda e: self.controller.log("Cash selected") or self.controller.show_frame(CashMethodScreen, timeout_ms=self.controller.default_timeout_ms * 10))
-        self.canvas.tag_bind(self.pay_rect, "<Button-1>", self._on_paypal_click)
+        self.canvas.tag_bind(self.pay_rect, "<Button-1>", lambda e: self._on_paypal_click())
         self.back_rect = self.canvas.create_rectangle(20, 520, 140, 580, outline="")
         self.canvas.tag_bind(self.back_rect, "<Button-1>", lambda e: self.controller.log("Back on PaymentSelection") or self.controller.show_frame(SummaryScreen, timeout_ms=self.controller.default_timeout_ms * 5))
 

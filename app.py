@@ -1136,7 +1136,7 @@ class App(tk.Tk):
         self.loading_text_obj = None
         self.loading_overlay_item = None
         self.loading_job = None
-        self.resume_inactivity()
+        self.reset_timer()
 
     def run_async(self, task, on_done=None):
         def worker():

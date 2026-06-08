@@ -24,7 +24,7 @@ class MoneyPulseAcceptor:
         bouncetime,
         decoder,
         accept_one_pulse=False,
-        debug_cooldown=0.5,
+        debug_cooldown=3,
         process_delay=0.2,
         shared_processing_lock=None,
         
@@ -245,7 +245,7 @@ class MachineController:
 
         # Servo tuning
         self.servo_run_value = 1.0
-        self.servo_stop_value = 0.02
+        self.servo_stop_value = -0.02
         self.servo_settle_time = 0.2
 
     def dispense_cup(self, seconds):
@@ -314,7 +314,7 @@ class HardwareManager:
             accept_one_pulse=False,  # keep False until ₱1 is stable
             debug_cooldown=5,
             process_delay=0.2,
-            shared_processing_lock=self.money_processing_lock,
+            shared_processing_lock=None,
         )
 
         self.bill_acceptor = MoneyPulseAcceptor(
@@ -328,7 +328,7 @@ class HardwareManager:
             accept_one_pulse=False,
             debug_cooldown=5,
             process_delay=0.5,
-            shared_processing_lock=self.money_processing_lock,
+            shared_processing_lock=None,
         )
 
         # Servo
