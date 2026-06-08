@@ -92,11 +92,11 @@ class MoneyPulseAcceptor:
     def _on_pulse(self, channel):
         now = time.monotonic()
 
-        print(
+        """ print(
             f"{self.name}: RAW pulse GPIO={self.pin} "
             f"time={now:.3f}"
-        )
-
+        ) """
+        
         # Ignore pulses while another acceptor is being processed.
         if self._shared_processing_active():
             return
@@ -132,12 +132,12 @@ class MoneyPulseAcceptor:
         age_since_last = (now - last_time) if last_time else 0
         age_since_first = (now - first_time) if first_time else 0
 
-        self.app.log(
+        """ self.app.log(
             f"{self.name}: STATUS active={active}, "
             f"pulses={pulses}, "
             f"since_last={age_since_last:.2f}s, "
             f"since_first={age_since_first:.2f}s"
-        )
+        ) """
 
         self.last_status_log = now
 
@@ -204,11 +204,11 @@ def decode_coin(pulses):
     return 0
 
 def decode_bill(pulses):
-    if 15 <= pulses <= 40:
+    if 15 <= pulses <= 45:
         return 20
-    if 41 <= pulses <= 100:
+    if 46 <= pulses <= 95:
         return 50
-    if 101 <= pulses <= 240:
+    if 96 <= pulses <= 240:
         return 100
     return 0
 
@@ -314,7 +314,7 @@ class HardwareManager:
             accept_one_pulse=False,  # keep False until ₱1 is stable
             debug_cooldown=5,
             process_delay=0.2,
-            shared_processing_lock=self.money_processing_lock,
+            shared_processing_lock=None,
         )
 
         self.bill_acceptor = MoneyPulseAcceptor(
@@ -328,7 +328,7 @@ class HardwareManager:
             accept_one_pulse=False,
             debug_cooldown=5,
             process_delay=0.5,
-            shared_processing_lock=self.money_processing_lock,
+            shared_processing_lock=None,
         )
 
         # Servo
