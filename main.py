@@ -36,5 +36,8 @@ Used GPIO Pins:
 - GPIO 18: Bill Acceptor
 - GPIO 5, 6, 8, 22, 23, 24, 25, 27: Relays
 - GPIO 12, 13, 19, 26: Servos
+
+Machine Process:
+- screens.py _machine_worker()
 """
 #endregion

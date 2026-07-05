@@ -2052,7 +2052,7 @@ class ProcessingScreen(tk.Frame):
 
             # simple placeholder liquid time
             self.controller.log("Machine worker: add_liquid start")
-            machine.add_liquid(3)
+            machine.add_liquid(10)
             self.controller.log("Machine worker: add_liquid done")
 
             # simple placeholder add ons time
