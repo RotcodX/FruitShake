@@ -2035,44 +2035,45 @@ class ProcessingScreen(tk.Frame):
             )
 
             # Example sequence — adjust timings later
+            # Process/Relay 1
             self.controller.log("Machine worker: dispense_cup start")
             machine.dispense_cup(2)
             self.controller.log("Machine worker: dispense_cup done")
 
-            # simple placeholder fruit dispense time based on number of fruits
+            # Process/Relay 2
             if fruits:
                 self.controller.log("Machine worker: dispense_fruit start")
                 machine.dispense_fruit(max(1, len(fruits)))
                 self.controller.log("Machine worker: dispense_fruit done")
 
-            # simple placeholder ice dispense time
+            # Process/Relay 3
             self.controller.log("Machine worker: dispense_ice start")
             machine.dispense_ice(2)
             self.controller.log("Machine worker: dispense_ice done")
 
-            # simple placeholder liquid time
+            # Process/Relay 4
             self.controller.log("Machine worker: add_liquid start")
-            machine.add_liquid(10)
+            machine.add_liquid(5)
             self.controller.log("Machine worker: add_liquid done")
 
-            # simple placeholder add ons time
+            # Process/Relay 5
             self.controller.log("Machine worker: dispense_addons start")
-            machine.dispense_addons(4)
+            machine.dispense_addons(10)
             self.controller.log("Machine worker: dispense_addons done")
 
-            # blender
+            # Process/Relay 6
             self.controller.log("Machine worker: run_blender start")
-            machine.run_blender(4)
+            machine.run_blender(10)
             self.controller.log("Machine worker: run_blender done")
 
-            # order dispense
+            # Process/Relay 7
             self.controller.log("Machine worker: dispense_order start")
             machine.dispense_order(6)
             self.controller.log("Machine worker: dispense_order done")
 
-            # simple placeholder cleaning time
+            # Process/Relay 8
             self.controller.log("Machine worker: cleaning start")
-            machine.cleaning(3)
+            machine.cleaning(10)
             self.controller.log("Machine worker: cleaning done")
 
             self.controller.after(0, self._mark_machine_done)

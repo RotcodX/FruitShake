@@ -262,17 +262,22 @@ class MachineController:
 
     def add_liquid(self, seconds):
         print(f"Dispensing liquid for {seconds}s.")
+        self.relays.pulse(22, seconds)
         self.run_servo_for_time(self.hardware.servo1, seconds, direction=1)
 
     def dispense_addons(self, seconds):
         print(f"Dispensing Add-Ons for {seconds}s.")
+        self.relays.pulse(5, seconds)
         self.run_servo_for_time(self.hardware.servo2, seconds, direction=1)
 
     def run_blender(self, seconds):
         print(f"Blending for {seconds}s.")
+        self.relays.pulse(6, seconds)
         self.run_servo_for_time(self.hardware.servo3, seconds, direction=1)
 
     def dispense_order(self, seconds):
+        print(f"Dispensing order for {seconds}s.")
+        self.relays.pulse(25, seconds)
         self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
 
     def cleaning(self, seconds):
