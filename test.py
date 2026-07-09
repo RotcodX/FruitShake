@@ -47,20 +47,21 @@ print(json.dumps(response.json(), indent=2)) """
 #endregion
 
 #region Hardware Tests
-from app import App
 import time
+from hardware import RelayController
 
-app = App()
+# Same relay GPIO pins used by your project
+relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
 
-# Wait for hardware initialization
-while app.machine is None:
-    time.sleep(0.1)
+try:
+    print("Turning ALL relays ON...")
+    relays.all_on()
 
-print("Turning all relays ON...")
-app.machine.relays.all_on()
+    time.sleep(10)
 
-time.sleep(10)
+    print("Turning ALL relays OFF...")
+    relays.all_off()
 
-print("Turning all relays OFF...")
-app.machine.relays.all_off()
+finally:
+    relays.cleanup()
 #endregion
