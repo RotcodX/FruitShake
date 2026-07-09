@@ -231,7 +231,13 @@ class RelayController:
 
     def pulse(self, pin, duration):
         GPIO.output(pin, GPIO.LOW)
+
+        # Allow the servo electronics to stabilize
+        time.sleep(0.2)
+
+        # Remaining run time
         time.sleep(duration)
+
         GPIO.output(pin, GPIO.HIGH)
 
     def cleanup(self):
