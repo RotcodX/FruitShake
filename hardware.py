@@ -231,18 +231,32 @@ class RelayController:
 
     def pulse(self, pin, duration):
         GPIO.output(pin, GPIO.LOW)
-
-        # Allow the servo electronics to stabilize
-        time.sleep(0.2)
-
-        # Remaining run time
         time.sleep(duration)
+        GPIO.output(pin, GPIO.HIGH)
 
+    def on(self, pin):
+        GPIO.output(pin, GPIO.LOW)
+
+    def off(self, pin):
         GPIO.output(pin, GPIO.HIGH)
 
     def cleanup(self):
         self.all_off()
         GPIO.cleanup()
+
+    def run_servo_for_time(self, servo, seconds, direction=None):
+        if direction is None:
+            direction = self.servo_run_value
+
+        # force stop first
+        servo.value = self.servo_stop_value
+        time.sleep(self.servo_settle_time)
+        # run
+        servo.value = direction
+        time.sleep(seconds)
+        # stop again
+        servo.value = self.servo_stop_value
+        time.sleep(self.servo_settle_time)
 
 class MachineController:
     def __init__(self, hardware):
@@ -272,22 +286,30 @@ class MachineController:
     # 5
     def dispense_addons(self, seconds):
         print(f"Dispensing Add-Ons for {seconds}s.")
-        self.relays.pulse(5, seconds)
+        self.relays.on(5)
+        self.run_servo_for_time(self.hardware.servo1, seconds, direction=1)
+        self.relays.off(5)
 
     # 6
     def run_blender(self, seconds):
         print(f"Blending for {seconds}s.")
-        self.relays.pulse(6, seconds)
+        self.relays.on(6)
+        self.run_servo_for_time(self.hardware.servo2, seconds, direction=1)
+        self.relays.off(6)
 
     # 7
     def dispense_order(self, seconds):
         print(f"Dispensing order for {seconds}s.")
-        self.relays.pulse(25, seconds)
+        self.relays.on(25)
+        self.run_servo_for_time(self.hardware.servo3, seconds, direction=1)
+        self.relays.off(25)
 
     # 8
     def cleaning(self, seconds):
         print(f"Cleaning up for {seconds}s.")
-        self.relays.pulse(8, seconds)
+        self.relays.on(8)
+        self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
+        self.relays.off(8)
 
     def cleanup(self):
         self.relays.cleanup()
@@ -326,3 +348,26 @@ class HardwareManager:
             process_delay=0.5,
             shared_processing_lock=None,
         )
+
+        # Servo
+        self.servo1 = Servo(12,
+            min_pulse_width=0.001,
+            max_pulse_width=0.002
+        )
+        self.servo2 = Servo(13,
+            min_pulse_width=0.001,
+            max_pulse_width=0.002
+        )
+        self.servo3 = Servo(19,
+            min_pulse_width=0.001,
+            max_pulse_width=0.002
+        )
+        self.servo4 = Servo(26,
+            min_pulse_width=0.001,
+            max_pulse_width=0.002
+        )
+
+        self.servo1.value = 0
+        self.servo2.value = 0
+        self.servo3.value = 0
+        self.servo4.value = 0
