@@ -55,27 +55,14 @@ relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
 
 try:
     relays.all_off() # Turn all off at start
-    print("Relay 5")
-    relays.pulse(23, 15)
+    print("Turning ALL relays ON...")
+    relays.all_on()
 
-    time.sleep(1)
+    time.sleep(10)
 
-    print("Relay 6")
-    relays.pulse(24, 15)
-
-    time.sleep(1)
-
-    print("Relay 7")
-    relays.pulse(27, 3)
-
-    time.sleep(1)
-
-    print("Relay 8")
-    relays.pulse(22, 15)
+    print("Turning ALL relays OFF...")
     relays.all_off()
 
-    relays.cleanup()
-
 finally:
-    print("End")
+    relays.cleanup()
 #endregion
