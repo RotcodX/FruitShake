@@ -34,7 +34,7 @@ PayPal:
 Used GPIO Pins:
 - GPIO 17: Coin Acceptor
 - GPIO 18: Bill Acceptor
-- GPIO 5, 6, 8, 22, 23, 24, 25, 27: Relays
+- GPIO 23, 24, 27, 22, 5, 6, 25, 8: Relays (In order)
 - GPIO 12, 13, 19, 26: Servos
 
 Machine Process:

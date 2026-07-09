@@ -29,7 +29,7 @@ print(f"Total pending: {len(rows)}") """
 #endregion
 
 #region PayPal Tests
-import requests
+""" import requests
 import json
 
 response = requests.post(
@@ -43,5 +43,24 @@ response = requests.post(
 )
 
 print("Status:", response.status_code)
-print(json.dumps(response.json(), indent=2))
+print(json.dumps(response.json(), indent=2)) """
+#endregion
+
+#region Hardware Tests
+from app import App
+import time
+
+app = App()
+
+# Wait for hardware initialization
+while app.machine is None:
+    time.sleep(0.1)
+
+print("Turning all relays ON...")
+app.machine.relays.all_on()
+
+time.sleep(10)
+
+print("Turning all relays OFF...")
+app.machine.relays.all_off()
 #endregion
