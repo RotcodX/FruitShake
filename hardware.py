@@ -244,20 +244,6 @@ class RelayController:
         self.all_off()
         GPIO.cleanup()
 
-    def run_servo_for_time(self, servo, seconds, direction=None):
-        if direction is None:
-            direction = self.servo_run_value
-
-        # force stop first
-        servo.value = self.servo_stop_value
-        time.sleep(self.servo_settle_time)
-        # run
-        servo.value = direction
-        time.sleep(seconds)
-        # stop again
-        servo.value = self.servo_stop_value
-        time.sleep(self.servo_settle_time)
-
 class MachineController:
     def __init__(self, hardware):
         self.hardware = hardware
@@ -313,6 +299,20 @@ class MachineController:
 
     def cleanup(self):
         self.relays.cleanup()
+
+    def run_servo_for_time(self, servo, seconds, direction=None):
+        if direction is None:
+            direction = self.servo_run_value
+
+        # force stop first
+        servo.value = self.servo_stop_value
+        time.sleep(self.servo_settle_time)
+        # run
+        servo.value = direction
+        time.sleep(seconds)
+        # stop again
+        servo.value = self.servo_stop_value
+        time.sleep(self.servo_settle_time)
 
 class HardwareManager:
     def __init__(self, app):
