@@ -249,6 +249,11 @@ class MachineController:
         self.hardware = hardware
         self.relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
 
+        # Servo tuning
+        self.servo_run_value = 1.0
+        self.servo_stop_value = -0.02
+        self.servo_settle_time = 0.2
+        
     # 1
     def dispense_cup(self, seconds):
         print("Dispensing cup.")
