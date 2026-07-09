@@ -54,6 +54,7 @@ from hardware import RelayController
 relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
 
 try:
+    relays.all_off() # Turn all off at start
     print("Turning ALL relays ON...")
     relays.all_on()
 
