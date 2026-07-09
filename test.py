@@ -74,6 +74,8 @@ try:
     relays.pulse(22, 15)
     relays.all_off()
 
-finally:
     relays.cleanup()
+
+finally:
+    print("End")
 #endregion
