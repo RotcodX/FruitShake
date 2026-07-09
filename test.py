@@ -56,12 +56,12 @@ relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
 try:
     relays.all_off() # Turn all off at start
     print("Relay 5")
-    relays.pulse(23, 30)
+    relays.pulse(23, 15)
 
     time.sleep(1)
 
     print("Relay 6")
-    relays.pulse(24, 30)
+    relays.pulse(24, 15)
 
     time.sleep(1)
 
@@ -71,7 +71,7 @@ try:
     time.sleep(1)
 
     print("Relay 8")
-    relays.pulse(22, 30)
+    relays.pulse(22, 15)
     relays.all_off()
 
 finally:
