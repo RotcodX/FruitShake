@@ -243,11 +243,6 @@ class MachineController:
         self.hardware = hardware
         self.relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
 
-        # Servo tuning
-        self.servo_run_value = 1.0
-        self.servo_stop_value = -0.02
-        self.servo_settle_time = 0.2
-
     # 1
     def dispense_cup(self, seconds):
         print("Dispensing cup.")
@@ -267,48 +262,29 @@ class MachineController:
     def add_liquid(self, seconds):
         print(f"Dispensing liquid for {seconds}s.")
         self.relays.pulse(22, seconds)
-        self.run_servo_for_time(self.hardware.servo1, seconds, direction=1)
 
     # 5
     def dispense_addons(self, seconds):
         print(f"Dispensing Add-Ons for {seconds}s.")
         self.relays.pulse(5, seconds)
-        self.run_servo_for_time(self.hardware.servo2, seconds, direction=1)
 
     # 6
     def run_blender(self, seconds):
         print(f"Blending for {seconds}s.")
         self.relays.pulse(6, seconds)
-        self.run_servo_for_time(self.hardware.servo3, seconds, direction=1)
 
     # 7
     def dispense_order(self, seconds):
         print(f"Dispensing order for {seconds}s.")
         self.relays.pulse(25, seconds)
-        self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
 
     # 8
     def cleaning(self, seconds):
         print(f"Cleaning up for {seconds}s.")
         self.relays.pulse(8, seconds)
-        self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
 
     def cleanup(self):
         self.relays.cleanup()
-
-    def run_servo_for_time(self, servo, seconds, direction=None):
-        if direction is None:
-            direction = self.servo_run_value
-
-        # force stop first
-        servo.value = self.servo_stop_value
-        time.sleep(self.servo_settle_time)
-        # run
-        servo.value = direction
-        time.sleep(seconds)
-        # stop again
-        servo.value = self.servo_stop_value
-        time.sleep(self.servo_settle_time)
 
 class HardwareManager:
     def __init__(self, app):
@@ -344,26 +320,3 @@ class HardwareManager:
             process_delay=0.5,
             shared_processing_lock=None,
         )
-
-        # Servo
-        self.servo1 = Servo(12,
-            min_pulse_width=0.001,
-            max_pulse_width=0.002
-        )
-        self.servo2 = Servo(13,
-            min_pulse_width=0.001,
-            max_pulse_width=0.002
-        )
-        self.servo3 = Servo(19,
-            min_pulse_width=0.001,
-            max_pulse_width=0.002
-        )
-        self.servo4 = Servo(26,
-            min_pulse_width=0.001,
-            max_pulse_width=0.002
-        )
-
-        self.servo1.value = 0
-        self.servo2.value = 0
-        self.servo3.value = 0
-        self.servo4.value = 0

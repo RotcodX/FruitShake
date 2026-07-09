@@ -63,6 +63,8 @@ try:
     print("Turning ALL relays OFF...")
     relays.all_off()
 
+    relays.cleanup() # Just to double check
+
 finally:
     relays.cleanup()
 #endregion
