@@ -47,5 +47,4 @@ print(json.dumps(response.json(), indent=2)) """
 #endregion
 
 #region Hardware Tests
-
 #endregion

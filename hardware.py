@@ -266,52 +266,32 @@ class MachineController:
     # 4
     def add_liquid(self, seconds):
         print(f"Dispensing liquid for {seconds}s.")
-        # Test
-        self.controller.log("Relay On")
         self.relays.pulse(22, seconds)
-        self.controller.log("Servo On")
         self.run_servo_for_time(self.hardware.servo1, seconds, direction=1)
-        self.controller.log("Done")
 
     # 5
     def dispense_addons(self, seconds):
         print(f"Dispensing Add-Ons for {seconds}s.")
-        # Test
-        self.controller.log("Relay On")
         self.relays.pulse(5, seconds)
-        self.controller.log("Servo On")
         self.run_servo_for_time(self.hardware.servo2, seconds, direction=1)
-        self.controller.log("Done")
 
     # 6
     def run_blender(self, seconds):
         print(f"Blending for {seconds}s.")
-        # Test
-        self.controller.log("Relay On")
         self.relays.pulse(6, seconds)
-        self.controller.log("Servo On")
         self.run_servo_for_time(self.hardware.servo3, seconds, direction=1)
-        self.controller.log("Done")
 
     # 7
     def dispense_order(self, seconds):
         print(f"Dispensing order for {seconds}s.")
-        # Test
-        self.controller.log("Relay On")
         self.relays.pulse(25, seconds)
-        self.controller.log("Servo On")
         self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
-        self.controller.log("Done")
 
     # 8
     def cleaning(self, seconds):
         print(f"Cleaning up for {seconds}s.")
-        # Test
-        self.controller.log("Relay On")
         self.relays.pulse(8, seconds)
-        self.controller.log("Servo On")
         self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
-        self.controller.log("Done")
 
     def cleanup(self):
         self.relays.cleanup()
