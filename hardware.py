@@ -246,6 +246,7 @@ class RelayController:
         self.servo2.value = None
         self.servo3.value = None
         self.servo4.value = None
+        time.sleep(2)
         GPIO.cleanup()
 
 class MachineController:
@@ -256,7 +257,6 @@ class MachineController:
         # Servo tuning
         self.servo_run_value = 1.0
         self.servo_stop_value = None
-        self.servo_settle_time = 0.2
         
     # 1
     def dispense_cup(self, seconds):
