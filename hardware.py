@@ -251,7 +251,7 @@ class MachineController:
 
         # Servo tuning
         self.servo_run_value = 1.0
-        self.servo_stop_value = -0.02
+        self.servo_stop_value = 0
         self.servo_settle_time = 0.2
         
     # 1
