@@ -51,15 +51,35 @@ from gpiozero import Servo
 from time import sleep
 
 servo = Servo(
-    12,                      # Change to your GPIO
+    12,
     min_pulse_width=0.001,
     max_pulse_width=0.002
 )
 
-print("Spinning...")
+servo.value = 0.00
+sleep(7)
 
-servo.value = 1.0
+servo.value = 0.01
+sleep(7)
 
-while True:
-    sleep(1)
+servo.value = 0.02
+sleep(7)
+
+servo.value = 0.03
+sleep(7)
+
+servo.value = 0.04
+sleep(7)
+
+servo.value = -0.01
+sleep(7)
+
+servo.value = -0.02
+sleep(7)
+
+servo.value = -0.03
+sleep(7)
+
+servo.value = -0.04
+sleep(7)
 #endregion
