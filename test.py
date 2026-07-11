@@ -52,8 +52,8 @@ from time import sleep
 
 servo = Servo(
     12,                      # Change to your GPIO
-    min_pulse_width=0.0005,
-    max_pulse_width=0.0025
+    min_pulse_width=0.001,
+    max_pulse_width=0.002
 )
 
 print("Spinning...")
