@@ -47,22 +47,19 @@ print(json.dumps(response.json(), indent=2)) """
 #endregion
 
 #region Hardware Tests
-import time
-from hardware import RelayController
+from gpiozero import Servo
+from time import sleep
 
-# Same relay GPIO pins used by your project
-relays = RelayController([23, 24, 27, 22, 5, 6, 25, 8])
+servo = Servo(
+    12,                      # Change to your GPIO
+    min_pulse_width=0.0005,
+    max_pulse_width=0.0025
+)
 
-try:
-    relays.all_off() # Turn all off at start
-    print("Turning ALL relays ON...")
-    relays.all_on()
+print("Spinning...")
 
-    time.sleep(10)
+servo.value = 1.0
 
-    print("Turning ALL relays OFF...")
-    relays.all_off()
-
-finally:
-    relays.cleanup()
+while True:
+    sleep(1)
 #endregion
