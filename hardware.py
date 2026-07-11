@@ -281,30 +281,22 @@ class MachineController:
     # 5
     def dispense_addons(self, seconds):
         print(f"Dispensing Add-Ons for {seconds}s.")
-        # self.relays.on(5)
         self.run_servo_for_time(self.hardware.servo1, seconds, direction=1)
-        # self.relays.off(5)
 
     # 6
     def run_blender(self, seconds):
         print(f"Blending for {seconds}s.")
-        # self.relays.on(6)
         self.run_servo_for_time(self.hardware.servo2, seconds, direction=1)
-        # self.relays.off(6)
 
     # 7
     def dispense_order(self, seconds):
         print(f"Dispensing order for {seconds}s.")
-        # self.relays.on(25)
         self.run_servo_for_time(self.hardware.servo3, seconds, direction=1)
-        # self.relays.off(25)
 
     # 8
     def cleaning(self, seconds):
         print(f"Cleaning up for {seconds}s.")
-        # self.relays.on(8)
         self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
-        # self.relays.off(8)
 
     def cleanup(self):
         self.relays.cleanup()
