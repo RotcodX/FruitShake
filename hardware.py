@@ -300,7 +300,7 @@ class MachineController:
         print(f"Cleaning up for {seconds}s.")
         # self.relays.on(8)
         self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
-        self.relays.off(8)
+        # self.relays.off(8)
 
     def cleanup(self):
         self.relays.cleanup()
