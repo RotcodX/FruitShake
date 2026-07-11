@@ -2036,7 +2036,7 @@ class ProcessingScreen(tk.Frame):
 
             # Example sequence — adjust timings later
             # Process/Relay 1
-            self.controller.log("Machine worker: dispense_cup start")
+            """ self.controller.log("Machine worker: dispense_cup start")
             machine.dispense_cup(2)
             self.controller.log("Machine worker: dispense_cup done")
 
@@ -2054,7 +2054,7 @@ class ProcessingScreen(tk.Frame):
             # Process/Relay 4
             self.controller.log("Machine worker: add_liquid start")
             machine.add_liquid(5)
-            self.controller.log("Machine worker: add_liquid done")
+            self.controller.log("Machine worker: add_liquid done") """
 
             # Process/Relay 5
             self.controller.log("Machine worker: dispense_addons start")
