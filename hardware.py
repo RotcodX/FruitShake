@@ -242,6 +242,10 @@ class RelayController:
 
     def cleanup(self):
         self.all_off()
+        self.servo1.value = None
+        self.servo2.value = None
+        self.servo3.value = None
+        self.servo4.value = None
         GPIO.cleanup()
 
 class MachineController:
@@ -310,14 +314,12 @@ class MachineController:
             direction = self.servo_run_value
 
         # force stop first
-        servo.value = self.servo_stop_value
-        time.sleep(self.servo_settle_time)
+        servo.value = None
         # run
         servo.value = direction
         time.sleep(seconds)
         # stop again
-        servo.value = self.servo_stop_value
-        time.sleep(self.servo_settle_time)
+        servo.value = None
 
 class HardwareManager:
     def __init__(self, app):
@@ -372,7 +374,7 @@ class HardwareManager:
             max_pulse_width=0.002
         )
 
-        self.servo1.value = 0
-        self.servo2.value = 0
-        self.servo3.value = 0
-        self.servo4.value = 0
+        self.servo1.value = None
+        self.servo2.value = None
+        self.servo3.value = None
+        self.servo4.value = None
