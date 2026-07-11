@@ -56,6 +56,9 @@ servo = Servo(
     max_pulse_width=0.002
 )
 
+servo.value = 1.00
+sleep(5)
+
 servo.value = 0.00
 sleep(7)
 
