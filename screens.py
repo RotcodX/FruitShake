@@ -2051,10 +2051,10 @@ class ProcessingScreen(tk.Frame):
             machine.dispense_ice(4)
             self.controller.log("Machine worker: dispense_ice done")
 
-            # Process/Relay 4
+            """ # Process/Relay 4
             self.controller.log("Machine worker: add_liquid start")
             machine.add_liquid(5)
-            self.controller.log("Machine worker: add_liquid done")
+            self.controller.log("Machine worker: add_liquid done") """
 
             # Process/Relay 5
             self.controller.log("Machine worker: dispense_addons start")
