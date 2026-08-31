@@ -313,6 +313,55 @@ class MachineController:
         # stop again
         servo.value = None
 
+    # Maintenance Mode tests
+    def test_pump1(self, seconds):
+        print(f"Maintenance: Pump 1 for {seconds}s")
+        self.relays.pulse(23, seconds)
+
+    def test_pump2(self, seconds):
+        print(f"Maintenance: Pump 2 for {seconds}s")
+        self.relays.pulse(24, seconds)
+
+    def test_pump3(self, seconds):
+        print(f"Maintenance: Pump 3 for {seconds}s")
+        self.relays.pulse(27, seconds)
+
+    def test_pump4(self, seconds):
+        print(f"Maintenance: Pump 4 for {seconds}s")
+        self.relays.pulse(22, seconds)
+
+    def test_servo1(self, seconds):
+        print(f"Maintenance: Servo 1 for {seconds}s")
+        self.run_servo_for_time(
+            self.hardware.servo1,
+            seconds,
+            direction=self.servo_run_value
+        )
+
+    def test_servo2(self, seconds):
+        print(f"Maintenance: Servo 2 for {seconds}s")
+        self.run_servo_for_time(
+            self.hardware.servo2,
+            seconds,
+            direction=self.servo_run_value
+        )
+
+    def test_servo3(self, seconds):
+        print(f"Maintenance: Servo 3 for {seconds}s")
+        self.run_servo_for_time(
+            self.hardware.servo3,
+            seconds,
+            direction=self.servo_run_value
+        )
+
+    def test_servo4(self, seconds):
+        print(f"Maintenance: Servo 4 for {seconds}s")
+        self.run_servo_for_time(
+            self.hardware.servo4,
+            seconds,
+            direction=self.servo_run_value
+        )
+
 class HardwareManager:
     def __init__(self, app):
         self.app = app

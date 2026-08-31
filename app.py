@@ -41,6 +41,7 @@ from screens import (
     ProcessingScreen,
     OrderCompleteScreen,
     ErrorScreen,
+    MaintenanceModeScreen
 )
 
 load_dotenv()
@@ -78,12 +79,35 @@ class App(tk.Tk):
         self.supabase = create_client(url, key)
         self.local_db = LocalDB()
 
+        # Check for internet at start
+        self.internet_available = False
+        self.supabase_available = False
+        self.manual_offline_mode = False
+        self.ping_job = None
+        self.ping_in_flight = False
+
         # data containers must exist before any online/offline load path
         self.catalog = {}
         self.addons = {}
         self.ingredients = {}
 
-        # Load startup data before building the UI
+        # Determine network mode ONCE for this app run.
+        self.internet_available = self.has_internet()
+
+        if self.internet_available:
+            self.log("Startup: Internet detected.")
+
+            # One startup-only Supabase availability check.
+            self.supabase_available = self.is_supabase_available()
+
+            if self.supabase_available:
+                self.log("Startup: Supabase available.")
+            else:
+                self.log("Startup: Internet available, but Supabase unavailable.")
+        else:
+            self.log("Startup: No internet detected. Running in offline mode.")
+
+        # Load data according to the startup network decision.
         self.load_remote_data()
         self.sync_pending_sales()
 
@@ -171,7 +195,9 @@ class App(tk.Tk):
                   PaypalMethodScreen,
                   ProcessingScreen,
                   OrderCompleteScreen,
-                  ErrorScreen):
+                  ErrorScreen,
+                  MaintenanceModeScreen
+        ):
             frame = F(container, self)
             self.frames[F] = frame
             frame.grid(row=0, column=0, sticky="nsew")
@@ -200,6 +226,13 @@ class App(tk.Tk):
         if HARDWARE_AVAILABLE:
             self.after(1500, self._init_hardware_late)
 
+    @property
+    def effective_online(self):
+        return (
+            self.internet_available
+            and not self.manual_offline_mode
+        )
+
     def _apply_fullscreen(self):
         try:
             self.attributes("-fullscreen", True)
@@ -226,8 +259,8 @@ class App(tk.Tk):
         self.log("Initializing inventory...")
 
         # Step 1: check if Supabase is reachable
-        if not self.is_supabase_available():
-            self.log("Supabase unavailable. Falling back to local database.")
+        if not self.internet_available or not self.supabase_available:
+            self.log("Offline mode: loading inventory from local database.")
             self.load_from_local_db()
             return
         self.log("Supabase available. Loading remote inventory...")
@@ -560,8 +593,8 @@ class App(tk.Tk):
             self.log(f"Failed to sync best-seller flags to Supabase: {e}")
 
     def sync_pending_sales(self):
-        if not self.is_supabase_available():
-            self.log("Sync skipped: Supabase unavailable.")
+        if not self.internet_available or not self.supabase_available:
+            self.log("Sync skipped: Offline mode.")
             return
 
         rows = self.local_db.get_pending_sales()
@@ -613,7 +646,7 @@ class App(tk.Tk):
 
         This should NOT pull stock from Supabase.
         """
-        if not self.is_supabase_available():
+        if not self.internet_available or not self.supabase_available:
             self.log("Inventory sync skipped: Supabase unavailable.")
             return False
 
@@ -717,7 +750,7 @@ class App(tk.Tk):
             # -------------------------
             # STEP 4: TRY SUPABASE (OPTIONAL)
             # -------------------------
-            if not self.is_supabase_available():
+            if not self.internet_available or not self.supabase_available:
                 self.log("Offline mode: sale queued locally.")
                 return {
                     "catalog": self.catalog,
@@ -862,6 +895,11 @@ class App(tk.Tk):
 
         self.hide_timeout_warning()
         frame.tkraise()
+
+        if cls in (PaymentSelectionScreen, PaypalMethodScreen):
+            self.start_ping_monitor()
+        else:
+            self.stop_ping_monitor()
 
         # configure active timeout
         if pause:
@@ -1246,3 +1284,113 @@ class App(tk.Tk):
 
         except Exception as e:
             self.log(f"Failed to load from local DB: {e}")
+
+    def start_ping_monitor(self):
+        """Start the live ping monitor used by Payment Selection and PayPal."""
+        if not self.internet_available:
+            self.update_ping_display(None)
+            return
+
+        if self.ping_job is not None or self.ping_in_flight:
+            return
+
+        self._run_ping_check()
+
+
+    def stop_ping_monitor(self):
+        """Stop the live ping monitor."""
+        if self.ping_job is not None:
+            try:
+                self.after_cancel(self.ping_job)
+            except Exception:
+                pass
+
+        self.ping_job = None
+        self.ping_in_flight = False
+
+
+    def _run_ping_check(self):
+        if not self.internet_available:
+            self.stop_ping_monitor()
+            self.update_ping_display(None)
+            return
+
+        if self.ping_in_flight:
+            return
+
+        self.ping_in_flight = True
+
+        def ping_task():
+            start = time.monotonic()
+
+            try:
+                with socket.create_connection(("1.1.1.1", 53), timeout=1.0):
+                    pass
+
+                return int((time.monotonic() - start) * 1000)
+
+            except Exception:
+                return None
+
+        def done(err, result=None):
+            self.ping_in_flight = False
+
+            if err:
+                self.update_ping_display(None)
+            else:
+                self.update_ping_display(result)
+
+            # Only continue while Payment Selection or PayPal is active.
+            if self.current_frame in (
+                self.frames.get(PaymentSelectionScreen),
+                self.frames.get(PaypalMethodScreen),
+            ):
+                self.ping_job = self.after(1000, self._run_ping_check)
+            else:
+                self.ping_job = None
+
+        self.run_async(ping_task, on_done=done)
+
+
+    def update_ping_display(self, ping_ms):
+        for cls in (PaymentSelectionScreen, PaypalMethodScreen):
+            frame = self.frames.get(cls)
+
+            if not frame:
+                continue
+
+            try:
+                if ping_ms is None:
+                    frame.set_ping_display(None)
+                else:
+                    frame.set_ping_display(ping_ms)
+            except Exception:
+                pass
+
+    def recheck_connection(self):
+        """
+        Manually perform a fresh internet + Supabase check.
+
+        This intentionally overrides the normal startup-only checking rule.
+        """
+        self.log("Manual connection recheck started.")
+
+        internet = self.has_internet()
+
+        supabase = False
+        if internet:
+            supabase = self.is_supabase_available()
+
+        self.internet_available = internet
+        self.supabase_available = supabase
+
+        self.log(
+            f"Connection recheck: "
+            f"internet={'ONLINE' if internet else 'OFFLINE'}, "
+            f"supabase={'ONLINE' if supabase else 'OFFLINE'}"
+        )
+
+        return {
+            "internet": internet,
+            "supabase": supabase,
+        }

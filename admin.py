@@ -40,6 +40,46 @@ class AdminPanel(tk.Frame):
 
         self._build_ui()
 
+        network_frame = tk.Frame(self, bg="#222")
+        network_frame.place(
+            x=10,
+            y=self.panel_height - 90,
+            relwidth=0.75,
+            height=40
+        )
+
+        self.internet_status_label = tk.Label(
+            network_frame,
+            text="Internet: --",
+            bg="#222",
+            fg="white"
+        )
+        self.internet_status_label.pack(side="left", padx=5)
+
+        self.supabase_status_label = tk.Label(
+            network_frame,
+            text="Supabase: --",
+            bg="#222",
+            fg="white"
+        )
+        self.supabase_status_label.pack(side="left", padx=5)
+
+        self._recheck_connection_btn = tk.Button(
+            network_frame,
+            text="Recheck Connection",
+            command=self._on_recheck_connection
+        )
+        self._recheck_connection_btn.pack(side="left", padx=5)
+
+        self._offline_mode_btn = tk.Button(
+            network_frame,
+            text="Offline Mode: OFF",
+            command=self._toggle_offline_mode
+        )
+        self._offline_mode_btn.pack(side="left", padx=5)
+
+        self.refresh_network_status()
+
     def _build_ui(self):
         # Clear any previous widgets
         for w in self.winfo_children():
@@ -78,9 +118,12 @@ class AdminPanel(tk.Frame):
             # Disabled for now since wala pang machine stock checker
             self._check_machine_btn = tk.Button(self, text="Check Machine Stock (test)", command=self._on_check_machine_stock)
             self._check_machine_btn.place(x=110, y=self.panel_height - 10, anchor="sw")
+            self._maintenance_btn = tk.Button(self, text="Maintenance Mode", command=self._open_maintenance_mode)
+            self._maintenance_btn.place(x=300, y=self.panel_height - 10, anchor="sw")
         else:
             self._recheck_btn = None
             self._check_machine_btn = None
+            self._maintenance_btn = None
 
         # Rows area
         rows_top = 0.075 if self.show_recheck_stock else 0.03
@@ -475,3 +518,93 @@ class AdminPanel(tk.Frame):
             self._refresh_related_ui()
 
         self.controller.run_async(task, on_done=done)
+
+    def _open_maintenance_mode(self):
+        self.hide()
+
+        try:
+            from screens import MaintenanceModeScreen
+
+            self.controller.show_frame(
+                MaintenanceModeScreen,
+                pause=True,
+                skip_error_check=True
+            )
+
+        except Exception as e:
+            self.controller.log(
+                f"Failed to open Maintenance Mode: {e}"
+            )
+
+    def _toggle_offline_mode(self):
+        self.controller.manual_offline_mode = (
+            not self.controller.manual_offline_mode
+        )
+
+        state = self.controller.manual_offline_mode
+
+        self._offline_mode_btn.config(
+            text=f"Offline Mode: {'ON' if state else 'OFF'}"
+        )
+
+        self.controller.log(
+            f"Admin: manual offline mode {'enabled' if state else 'disabled'}"
+        )
+
+        self.refresh_network_status()
+
+    def _on_recheck_connection(self):
+        if self.controller.busy:
+            return
+
+        parent_canvas = getattr(self.master, "canvas", None)
+
+        if parent_canvas is not None:
+            self.controller.show_loading_gif(parent_canvas)
+
+        def task():
+            return self.controller.recheck_connection()
+
+        def done(err, result=None):
+            if parent_canvas is not None:
+                self.controller.hide_loading_gif()
+
+            if err:
+                self.controller.log(
+                    f"Connection recheck failed: {err}"
+                )
+                return
+
+            self.refresh_network_status()
+
+        self.controller.run_async(task, on_done=done)
+
+    def refresh_network_status(self):
+        internet = bool(
+            getattr(self.controller, "internet_available", False)
+        )
+
+        supabase = bool(
+            getattr(self.controller, "supabase_available", False)
+        )
+
+        offline_mode = bool(
+            getattr(self.controller, "manual_offline_mode", False)
+        )
+
+        # Internet status
+        self.internet_status_label.config(
+            text=f"Internet: {'ONLINE' if internet else 'OFFLINE'}",
+            fg="#00FF00" if internet else "#FF0000"
+        )
+
+        # Supabase status
+        self.supabase_status_label.config(
+            text=f"Supabase: {'ONLINE' if supabase else 'OFFLINE'}",
+            fg="#00FF00" if supabase else "#FF0000"
+        )
+
+        # Manual offline mode
+        self._offline_mode_btn.config(
+            text=f"Offline Mode: {'ON' if offline_mode else 'OFF'}"
+        )

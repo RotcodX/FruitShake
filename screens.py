@@ -897,6 +897,20 @@ class PaymentSelectionScreen(tk.Frame):
         self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
         self.render_summary()
 
+        self.ping_text_id = OutlinedText(
+            self.canvas,
+            SCREEN_W - 25,
+            25,
+            text="Ping: --",
+            font=("Inter", 12),
+            fill="#00FF00",
+            stroke=2,
+            stroke_fill="#000000",
+            mode="pillow",
+            anchor="e",
+            pillow_font_path=FONT_INTER
+        )
+
     def _on_paypal_click(self, event=None):
         if not getattr(self, "is_online", False):
             self.controller.log("PayPal blocked: offline mode")
@@ -926,6 +940,28 @@ class PaymentSelectionScreen(tk.Frame):
         except Exception as e:
             self.controller.log(f"PaymentSelectionScreen: online state update failed: {e}")
 
+    def set_ping_display(self, ping_ms):
+        if ping_ms is None:
+            self.ping_text_id.update(
+                text="Ping: Offline",
+                fill="#FF0000"
+            )
+            return
+
+        if ping_ms <= 100:
+            fill = "#00FF00"
+        elif ping_ms <= 300:
+            fill = "#FFFF00"
+        elif ping_ms <= 500:
+            fill = "#FF9900"
+        else:
+            fill = "#FF0000"
+
+        self.ping_text_id.update(
+            text=f"Ping: {ping_ms} ms",
+            fill=fill
+        )
+
     def render_summary(self):
         parts = []
         if self.controller.selected_fruits:
@@ -940,25 +976,19 @@ class PaymentSelectionScreen(tk.Frame):
         super().tkraise(*args, **kwargs)
         try:
             self.render_summary()
-
-            now = time.monotonic()
-            if self._online_check_in_flight:
-                return
-
-            # reuse recent result for 15 seconds
-            if now - self._last_online_check_ts < 15:
-                self.is_online = self._last_online_result
-                self.update_online_state()
-                return
-
-            self._online_check_in_flight = True
-            self.controller.show_loading_gif(self.canvas)
-            self.controller.run_async(
-                self.controller.has_internet,
-                on_done=self._after_online_check
-            )
+            # Internet availability is determined at startup.
+            online = getattr(self.controller, "internet_available", False)
+            self.is_online = online
+            self.update_online_state()
+            # Start live ping display only when startup detected
+            # an internet connection.
+            if online:
+                self.controller.start_ping_monitor()
+            else:
+                self.controller.stop_ping_monitor()
+                self.update_ping_display(None)
         except Exception as e:
-            self.controller.log(f"PaymentSelectionScreen: tkraise render_summary failed: {e}")
+            self.controller.log(f"PaymentSelectionScreen: tkraise failed: {e}")
 
 class CashMethodScreen(tk.Frame):
     def __init__(self, parent, controller):
@@ -1337,6 +1367,20 @@ class PaypalMethodScreen(tk.Frame):
         # SummaryBar for this screen
         self.summary = SummaryBar(self, parent_canvas=self.canvas, x=SCREEN_W//2, y=560)
 
+        self.ping_text_id = OutlinedText(
+            self.canvas,
+            SCREEN_W - 25,
+            25,
+            text="Ping: --",
+            font=("Inter", 12),
+            fill="#00FF00",
+            stroke=2,
+            stroke_fill="#000000",
+            mode="pillow",
+            anchor="e",
+            pillow_font_path=FONT_INTER
+        )
+
     def _throttled_log(self, msg, interval=4.0):
         now = time.monotonic()
         if now - getattr(self, "_paypal_last_log_ts", 0.0) >= interval:
@@ -1475,6 +1519,28 @@ class PaypalMethodScreen(tk.Frame):
         if self.paypal_poll_job:
             self.after_cancel(self.paypal_poll_job)
             self.paypal_poll_job = None
+
+    def set_ping_display(self, ping_ms):
+        if ping_ms is None:
+            self.ping_text_id.update(
+                text="Ping: Offline",
+                fill="#FF0000"
+            )
+            return
+
+        if ping_ms <= 100:
+            fill = "#00FF00"
+        elif ping_ms <= 300:
+            fill = "#FFFF00"
+        elif ping_ms <= 500:
+            fill = "#FF9900"
+        else:
+            fill = "#FF0000"
+
+        self.ping_text_id.update(
+            text=f"Ping: {ping_ms} ms",
+            fill=fill
+        )
 
     def render_summary(self):
         parts = []
@@ -2178,3 +2244,392 @@ class ErrorScreen(tk.Frame):
         self._admin_tap_count = 0
         self._admin_tap_reset_job = None
         self.controller.log("Error admin tap count reset")
+
+class MaintenanceModeScreen(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg="#222")
+        self.controller = controller
+
+        # -------------------------------------------------
+        # Settings
+        # -------------------------------------------------
+        self.test_duration = tk.IntVar(value=3)
+
+        # -------------------------------------------------
+        # Main container
+        # -------------------------------------------------
+        self.main_frame = tk.Frame(self, bg="#222")
+        self.main_frame.pack(fill="both", expand=True, padx=10, pady=8)
+
+        # -------------------------------------------------
+        # Title
+        # -------------------------------------------------
+        title = tk.Label(
+            self.main_frame,
+            text="MAINTENANCE MODE",
+            font=("Arial", 18, "bold"),
+            bg="#222",
+            fg="white"
+        )
+        title.pack(pady=(0, 6))
+
+        # -------------------------------------------------
+        # Test duration
+        # -------------------------------------------------
+        duration_frame = tk.Frame(self.main_frame, bg="#222")
+        duration_frame.pack(fill="x", pady=(0, 8))
+
+        tk.Label(
+            duration_frame,
+            text="Test Duration:",
+            font=("Arial", 12, "bold"),
+            bg="#222",
+            fg="white"
+        ).pack(side="left", padx=(0, 8))
+
+        tk.Button(
+            duration_frame,
+            text="-",
+            width=3,
+            command=self.decrease_duration
+        ).pack(side="left")
+
+        self.duration_label = tk.Label(
+            duration_frame,
+            textvariable=self.test_duration,
+            width=5,
+            font=("Arial", 12, "bold"),
+            bg="#333",
+            fg="white"
+        )
+        self.duration_label.pack(side="left", padx=4)
+
+        tk.Label(
+            duration_frame,
+            text="sec",
+            font=("Arial", 12),
+            bg="#222",
+            fg="white"
+        ).pack(side="left", padx=(0, 8))
+
+        tk.Button(
+            duration_frame,
+            text="+",
+            width=3,
+            command=self.increase_duration
+        ).pack(side="left")
+
+        # -------------------------------------------------
+        # Pumps
+        # -------------------------------------------------
+        self._add_section_title("PUMPS")
+
+        pumps_frame = tk.Frame(self.main_frame, bg="#222")
+        pumps_frame.pack(fill="x", pady=(0, 6))
+
+        self._add_test_button(
+            pumps_frame,
+            "PUMP 1",
+            lambda: self._run_test("pump1")
+        ).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+
+        self._add_test_button(
+            pumps_frame,
+            "PUMP 2",
+            lambda: self._run_test("pump2")
+        ).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+
+        self._add_test_button(
+            pumps_frame,
+            "PUMP 3",
+            lambda: self._run_test("pump3")
+        ).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
+
+        self._add_test_button(
+            pumps_frame,
+            "PUMP 4",
+            lambda: self._run_test("pump4")
+        ).grid(row=1, column=1, padx=2, pady=2, sticky="ew")
+
+        pumps_frame.grid_columnconfigure(0, weight=1)
+        pumps_frame.grid_columnconfigure(1, weight=1)
+
+        # -------------------------------------------------
+        # Servos
+        # -------------------------------------------------
+        self._add_section_title("SERVOS")
+
+        servos_frame = tk.Frame(self.main_frame, bg="#222")
+        servos_frame.pack(fill="x", pady=(0, 6))
+
+        self._add_test_button(
+            servos_frame,
+            "SERVO 1",
+            lambda: self._run_test("servo1")
+        ).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+
+        self._add_test_button(
+            servos_frame,
+            "SERVO 2",
+            lambda: self._run_test("servo2")
+        ).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+
+        self._add_test_button(
+            servos_frame,
+            "SERVO 3",
+            lambda: self._run_test("servo3")
+        ).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
+
+        self._add_test_button(
+            servos_frame,
+            "SERVO 4",
+            lambda: self._run_test("servo4")
+        ).grid(row=1, column=1, padx=2, pady=2, sticky="ew")
+
+        servos_frame.grid_columnconfigure(0, weight=1)
+        servos_frame.grid_columnconfigure(1, weight=1)
+
+        # -------------------------------------------------
+        # Cash acceptors
+        # -------------------------------------------------
+        self._add_section_title("CASH ACCEPTORS")
+
+        cash_frame = tk.Frame(self.main_frame, bg="#222")
+        cash_frame.pack(fill="x", pady=(0, 6))
+
+        # Coin
+        self.coin_status = tk.StringVar(value="OFF")
+        self.coin_pulses = tk.StringVar(value="Pulses: 0")
+
+        self._add_acceptor(
+            cash_frame,
+            "COIN ACCEPTOR",
+            self.coin_status,
+            self.coin_pulses,
+            self.toggle_coin_acceptor,
+            self.reset_coin_pulses,
+            column=0
+        )
+
+        # Bill
+        self.bill_status = tk.StringVar(value="OFF")
+        self.bill_pulses = tk.StringVar(value="Pulses: 0")
+
+        self._add_acceptor(
+            cash_frame,
+            "BILL ACCEPTOR",
+            self.bill_status,
+            self.bill_pulses,
+            self.toggle_bill_acceptor,
+            self.reset_bill_pulses,
+            column=1
+        )
+
+        cash_frame.grid_columnconfigure(0, weight=1)
+        cash_frame.grid_columnconfigure(1, weight=1)
+
+        # -------------------------------------------------
+        # Bottom buttons
+        # -------------------------------------------------
+        bottom_frame = tk.Frame(self.main_frame, bg="#222")
+        bottom_frame.pack(fill="x", side="bottom", pady=(4, 0))
+
+        tk.Button(
+            bottom_frame,
+            text="BACK",
+            width=12,
+            command=self.go_back
+        ).pack(side="left")
+
+    # =====================================================
+    # UI helpers
+    # =====================================================
+
+    def _add_section_title(self, text):
+        label = tk.Label(
+            self.main_frame,
+            text=text,
+            font=("Arial", 11, "bold"),
+            bg="#333",
+            fg="white",
+            anchor="w"
+        )
+        label.pack(fill="x", pady=(4, 2))
+
+    def _add_test_button(self, parent, text, command):
+        return tk.Button(
+            parent,
+            text=text,
+            height=2,
+            command=command
+        )
+
+    def _add_acceptor(
+        self,
+        parent,
+        title,
+        status_var,
+        pulses_var,
+        toggle_command,
+        reset_command,
+        column
+    ):
+        frame = tk.Frame(parent, bg="#333", bd=1, relief="solid")
+        frame.grid(
+            row=0,
+            column=column,
+            padx=2,
+            pady=2,
+            sticky="ew"
+        )
+
+        tk.Label(
+            frame,
+            text=title,
+            font=("Arial", 11, "bold"),
+            bg="#333",
+            fg="white"
+        ).pack(pady=(3, 1))
+
+        tk.Label(
+            frame,
+            textvariable=status_var,
+            bg="#333",
+            fg="white"
+        ).pack()
+
+        tk.Label(
+            frame,
+            textvariable=pulses_var,
+            bg="#333",
+            fg="white"
+        ).pack()
+
+        tk.Button(
+            frame,
+            text="ENABLE",
+            command=toggle_command
+        ).pack(side="left", padx=3, pady=3)
+
+        tk.Button(
+            frame,
+            text="RESET",
+            command=reset_command
+        ).pack(side="right", padx=3, pady=3)
+
+    # =====================================================
+    # Duration
+    # =====================================================
+
+    def increase_duration(self):
+        value = self.test_duration.get()
+        self.test_duration.set(min(60, value + 1))
+
+    def decrease_duration(self):
+        value = self.test_duration.get()
+        self.test_duration.set(max(1, value - 1))
+
+    # =====================================================
+    # Hardware tests
+    # =====================================================
+
+    def _run_test(self, test_name):
+        seconds = self.test_duration.get()
+
+        try:
+            if test_name == "pump1":
+                self.controller.machine.test_pump1(seconds)
+
+            elif test_name == "pump2":
+                self.controller.machine.test_pump2(seconds)
+
+            elif test_name == "pump3":
+                self.controller.machine.test_pump3(seconds)
+
+            elif test_name == "servo1":
+                self.controller.machine.test_servo1(seconds)
+
+            elif test_name == "servo2":
+                self.controller.machine.test_servo2(seconds)
+
+            elif test_name == "servo3":
+                self.controller.machine.test_servo3(seconds)
+
+            elif test_name == "servo4":
+                self.controller.machine.test_servo4(seconds)
+
+        except Exception as e:
+            self.controller.log(
+                f"Maintenance test '{test_name}' failed: {e}"
+            )
+
+    # =====================================================
+    # Cash acceptors
+    # =====================================================
+
+    def toggle_coin_acceptor(self):
+        self.controller.log("Maintenance: toggling coin acceptor")
+
+        # Placeholder for the acceptor enable/disable logic.
+        # We'll connect this to your existing MoneyPulseAcceptor
+        # implementation separately so we don't accidentally
+        # interfere with the normal CashMethodScreen logic.
+
+    def toggle_bill_acceptor(self):
+        self.controller.log("Maintenance: toggling bill acceptor")
+
+        # Placeholder for the acceptor enable/disable logic.
+
+    def reset_coin_pulses(self):
+        try:
+            acceptor = self.controller.hardware.coin_acceptor
+
+            with acceptor.lock:
+                acceptor.pulse_count = 0
+                acceptor.last_pulse_time = 0.0
+                acceptor.first_pulse_time = 0.0
+                acceptor.pulse_active = False
+
+            self.coin_pulses.set("Pulses: 0")
+            self.controller.log("Maintenance: coin pulse counter reset")
+
+        except Exception as e:
+            self.controller.log(
+                f"Maintenance: failed to reset coin pulses: {e}"
+            )
+
+    def reset_bill_pulses(self):
+        try:
+            acceptor = self.controller.hardware.bill_acceptor
+
+            with acceptor.lock:
+                acceptor.pulse_count = 0
+                acceptor.last_pulse_time = 0.0
+                acceptor.first_pulse_time = 0.0
+                acceptor.pulse_active = False
+
+            self.bill_pulses.set("Pulses: 0")
+            self.controller.log("Maintenance: bill pulse counter reset")
+
+        except Exception as e:
+            self.controller.log(
+                f"Maintenance: failed to reset bill pulses: {e}"
+            )
+
+    # =====================================================
+    # Navigation
+    # =====================================================
+
+    def go_back(self):
+        self.controller.show_frame(
+            WelcomeScreen,
+            pause=True
+        )
+
+    def tkraise(self, *args, **kwargs):
+        super().tkraise(*args, **kwargs)
+
+        try:
+            self.controller.pause_inactivity()
+        except Exception:
+            pass
