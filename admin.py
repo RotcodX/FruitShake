@@ -548,10 +548,12 @@ class AdminPanel(tk.Frame):
         )
 
         self.controller.log(
-            f"Admin: manual offline mode {'enabled' if state else 'disabled'}"
+            f"Admin: manual offline mode "
+            f"{'enabled' if state else 'disabled'}"
         )
 
         self.refresh_network_status()
+        self.controller.update_network_dependent_ui()
 
     def _on_recheck_connection(self):
         if self.controller.busy:

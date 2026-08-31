@@ -912,7 +912,7 @@ class PaymentSelectionScreen(tk.Frame):
         )
 
     def _on_paypal_click(self, event=None):
-        if not getattr(self, "is_online", False):
+        if not self.controller.effective_online:
             self.controller.log("PayPal blocked: offline mode")
             return
 
@@ -920,11 +920,23 @@ class PaymentSelectionScreen(tk.Frame):
         self.controller.show_frame(PaypalMethodScreen, timeout_ms=self.controller.default_timeout_ms * 10)
 
     def update_online_state(self):
-        if not self.is_online:
-            self.canvas.itemconfigure(self.offline_paypal_item, state="normal")
-            self.controller.log("PaymentSelection: OFFLINE - PayPal disabled")
+        online = self.controller.effective_online
+
+        self.is_online = online
+
+        if not online:
+            self.canvas.itemconfigure(
+                self.offline_paypal_item,
+                state="normal"
+            )
+            self.controller.log(
+                "PaymentSelection: OFFLINE - PayPal disabled"
+            )
         else:
-            self.canvas.itemconfigure(self.offline_paypal_item, state="hidden")
+            self.canvas.itemconfigure(
+                self.offline_paypal_item,
+                state="hidden"
+            )
 
     def _after_online_check(self, err, result):
         self._online_check_in_flight = False

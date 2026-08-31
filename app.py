@@ -1308,9 +1308,8 @@ class App(tk.Tk):
         self.ping_job = None
         self.ping_in_flight = False
 
-
     def _run_ping_check(self):
-        if not self.internet_available:
+        if not self.effective_online:
             self.stop_ping_monitor()
             self.update_ping_display(None)
             return
@@ -1324,10 +1323,15 @@ class App(tk.Tk):
             start = time.monotonic()
 
             try:
-                with socket.create_connection(("1.1.1.1", 53), timeout=1.0):
+                with socket.create_connection(
+                    ("1.1.1.1", 53),
+                    timeout=1.0
+                ):
                     pass
 
-                return int((time.monotonic() - start) * 1000)
+                return int(
+                    (time.monotonic() - start) * 1000
+                )
 
             except Exception:
                 return None
@@ -1340,17 +1344,26 @@ class App(tk.Tk):
             else:
                 self.update_ping_display(result)
 
-            # Only continue while Payment Selection or PayPal is active.
+            if not self.effective_online:
+                self.stop_ping_monitor()
+                self.update_ping_display(None)
+                return
+
             if self.current_frame in (
                 self.frames.get(PaymentSelectionScreen),
                 self.frames.get(PaypalMethodScreen),
             ):
-                self.ping_job = self.after(1000, self._run_ping_check)
+                self.ping_job = self.after(
+                    1000,
+                    self._run_ping_check
+                )
             else:
                 self.ping_job = None
 
-        self.run_async(ping_task, on_done=done)
-
+        self.run_async(
+            ping_task,
+            on_done=done
+        )
 
     def update_ping_display(self, ping_ms):
         for cls in (PaymentSelectionScreen, PaypalMethodScreen):
@@ -1394,3 +1407,33 @@ class App(tk.Tk):
             "internet": internet,
             "supabase": supabase,
         }
+
+    def update_network_dependent_ui(self):
+        online = self.effective_online
+
+        payment_screen = self.frames.get(PaymentSelectionScreen)
+        paypal_screen = self.frames.get(PaypalMethodScreen)
+
+        if payment_screen:
+            payment_screen.is_online = online
+            payment_screen.update_online_state()
+
+        if paypal_screen:
+            paypal_screen.set_ping_display(
+                None if not online else getattr(
+                    paypal_screen,
+                    "_last_ping",
+                    None
+                )
+            )
+
+        if online and self.current_frame in (
+            self.frames.get(PaymentSelectionScreen),
+            self.frames.get(PaypalMethodScreen),
+        ):
+            self.start_ping_monitor()
+        else:
+            self.stop_ping_monitor()
+
+        if not online:
+            self.update_ping_display(None)
