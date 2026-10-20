@@ -2279,7 +2279,7 @@ class MaintenanceModeScreen(tk.Frame):
         title = tk.Label(
             self.main_frame,
             text="MAINTENANCE MODE",
-            font=("Arial", 18, "bold"),
+            font=("Arial", 12, "bold"),
             bg="#222",
             fg="white"
         )
@@ -2294,7 +2294,7 @@ class MaintenanceModeScreen(tk.Frame):
         tk.Label(
             duration_frame,
             text="Test Duration:",
-            font=("Arial", 12, "bold"),
+            font=("Arial", 9, "bold"),
             bg="#222",
             fg="white"
         ).pack(side="left", padx=(0, 8))
@@ -2310,7 +2310,7 @@ class MaintenanceModeScreen(tk.Frame):
             duration_frame,
             textvariable=self.test_duration,
             width=5,
-            font=("Arial", 12, "bold"),
+            font=("Arial", 9, "bold"),
             bg="#333",
             fg="white"
         )
@@ -2319,7 +2319,7 @@ class MaintenanceModeScreen(tk.Frame):
         tk.Label(
             duration_frame,
             text="sec",
-            font=("Arial", 12),
+            font=("Arial", 9),
             bg="#222",
             fg="white"
         ).pack(side="left", padx=(0, 8))
@@ -2343,37 +2343,37 @@ class MaintenanceModeScreen(tk.Frame):
             pumps_frame,
             "PUMP 1/RELAY 1",
             lambda: self._run_test("pump1")
-        ).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+        ).grid(row=0, column=0, padx=2, pady=1, sticky="ew")
 
         self._add_test_button(
             pumps_frame,
             "PUMP 2/RELAY 2",
             lambda: self._run_test("pump2")
-        ).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+        ).grid(row=0, column=1, padx=2, pady=1, sticky="ew")
 
         self._add_test_button(
             pumps_frame,
             "PUMP 3/RELAY 3",
             lambda: self._run_test("pump3")
-        ).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
+        ).grid(row=1, column=0, padx=2, pady=1, sticky="ew")
 
         self._add_test_button(
             pumps_frame,
             "PUMP 4/RELAY 4",
             lambda: self._run_test("pump4")
-        ).grid(row=1, column=1, padx=2, pady=2, sticky="ew")
+        ).grid(row=1, column=1, padx=2, pady=1, sticky="ew")
 
         self._add_test_button(
             pumps_frame,
             "ALL: ON",
             lambda: self._run_test("allon")
-        ).grid(row=2, column=0, padx=2, pady=2, sticky="ew")
+        ).grid(row=2, column=0, padx=2, pady=1, sticky="ew")
 
         self._add_test_button(
             pumps_frame,
             "ALL: OFF",
             lambda: self._run_test("alloff")
-        ).grid(row=2, column=1, padx=2, pady=2, sticky="ew")
+        ).grid(row=2, column=1, padx=2, pady=1, sticky="ew")
 
         pumps_frame.grid_columnconfigure(0, weight=1)
         pumps_frame.grid_columnconfigure(1, weight=1)
