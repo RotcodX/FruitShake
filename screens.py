@@ -2334,34 +2334,46 @@ class MaintenanceModeScreen(tk.Frame):
         # -------------------------------------------------
         # Pumps
         # -------------------------------------------------
-        self._add_section_title("PUMPS")
+        self._add_section_title("RELAY")
 
         pumps_frame = tk.Frame(self.main_frame, bg="#222")
         pumps_frame.pack(fill="x", pady=(0, 6))
 
         self._add_test_button(
             pumps_frame,
-            "PUMP 1",
+            "PUMP 1/RELAY 1",
             lambda: self._run_test("pump1")
         ).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
 
         self._add_test_button(
             pumps_frame,
-            "PUMP 2",
+            "PUMP 2/RELAY 2",
             lambda: self._run_test("pump2")
         ).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
 
         self._add_test_button(
             pumps_frame,
-            "PUMP 3",
+            "PUMP 3/RELAY 3",
             lambda: self._run_test("pump3")
         ).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
 
         self._add_test_button(
             pumps_frame,
-            "PUMP 4",
+            "PUMP 4/RELAY 4",
             lambda: self._run_test("pump4")
         ).grid(row=1, column=1, padx=2, pady=2, sticky="ew")
+
+        self._add_test_button(
+            pumps_frame,
+            "ALL: ON",
+            lambda: self._run_test("allon")
+        ).grid(row=2, column=0, padx=2, pady=2, sticky="ew")
+
+        self._add_test_button(
+            pumps_frame,
+            "ALL: OFF",
+            lambda: self._run_test("alloff")
+        ).grid(row=2, column=1, padx=2, pady=2, sticky="ew")
 
         pumps_frame.grid_columnconfigure(0, weight=1)
         pumps_frame.grid_columnconfigure(1, weight=1)
@@ -2569,6 +2581,12 @@ class MaintenanceModeScreen(tk.Frame):
 
             elif test_name == "servo4":
                 self.controller.machine.test_servo4(seconds)
+
+            elif test_name == "allon":
+                self.controller.machine.allon()
+
+            elif test_name == "alloff":
+                self.controller.machine.alloff()
 
         except Exception as e:
             self.controller.log(

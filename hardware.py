@@ -314,6 +314,15 @@ class MachineController:
         servo.value = None
 
     # Maintenance Mode tests
+
+    def allon(self):
+        print(f"Maintenance: All relays on")
+        self.relays.all_on()
+
+    def alloff(self):
+        print(f"Maintenance: All relays off")
+        self.relays.all_off()
+
     def test_pump1(self, seconds):
         print(f"Maintenance: Pump 1 for {seconds}s")
         self.relays.pulse(23, seconds)
