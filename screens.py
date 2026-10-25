@@ -2187,6 +2187,7 @@ class ErrorScreen(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
+        self._acceptor_refresh_job = None
 
         # Canvas / background (keep touch feedback binding)
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
@@ -2423,7 +2424,7 @@ class MaintenanceModeScreen(tk.Frame):
 
         # Coin
         self.coin_status = tk.StringVar(value="OFF")
-        self.coin_pulses = tk.StringVar(value="Pulses: 0")
+        self.coin_pulses = tk.StringVar(value="Pulses: 0 | Value: --")
 
         self._add_acceptor(
             cash_frame,
@@ -2437,7 +2438,7 @@ class MaintenanceModeScreen(tk.Frame):
 
         # Bill
         self.bill_status = tk.StringVar(value="OFF")
-        self.bill_pulses = tk.StringVar(value="Pulses: 0")
+        self.bill_pulses = tk.StringVar(value="Pulses: 0 | Value: --")
 
         self._add_acceptor(
             cash_frame,
@@ -2529,11 +2530,18 @@ class MaintenanceModeScreen(tk.Frame):
             fg="white"
         ).pack()
 
-        tk.Button(
+        toggle_button = tk.Button(
             frame,
             text="ENABLE",
             command=toggle_command
-        ).pack(side="left", padx=3, pady=3)
+        )
+        toggle_button.pack(side="left", padx=3, pady=3)
+
+        # Keep a reference so the button text can reflect its state.
+        if title == "COIN ACCEPTOR":
+            self.coin_toggle_button = toggle_button
+        elif title == "BILL ACCEPTOR":
+            self.bill_toggle_button = toggle_button
 
         tk.Button(
             frame,
@@ -2597,18 +2605,132 @@ class MaintenanceModeScreen(tk.Frame):
     # Cash acceptors
     # =====================================================
 
-    def toggle_coin_acceptor(self):
-        self.controller.log("Maintenance: toggling coin acceptor")
+    def _refresh_acceptor_display(self):
+        """Refresh acceptor status and pulse preview while this screen is visible."""
+        self._acceptor_refresh_job = None
 
-        # Placeholder for the acceptor enable/disable logic.
-        # We'll connect this to your existing MoneyPulseAcceptor
-        # implementation separately so we don't accidentally
-        # interfere with the normal CashMethodScreen logic.
+        hardware = getattr(self.controller, "hardware", None)
+
+        for kind in ("coin", "bill"):
+            acceptor = (
+                getattr(hardware, f"{kind}_acceptor", None)
+                if hardware is not None
+                else None
+            )
+
+            self._update_one_acceptor_display(kind, acceptor)
+
+        # Keep polling only while Maintenance Mode is the active screen.
+        if getattr(self.controller, "current_frame", None) is self:
+            self._acceptor_refresh_job = self.after(
+                150,
+                self._refresh_acceptor_display
+            )
+
+    def _update_one_acceptor_display(self, kind, acceptor):
+        status_var = getattr(self, f"{kind}_status")
+        pulses_var = getattr(self, f"{kind}_pulses")
+        toggle_button = getattr(self, f"{kind}_toggle_button")
+
+        if acceptor is None:
+            status_var.set("UNAVAILABLE")
+            pulses_var.set("Pulses: -- | Value: --")
+            toggle_button.config(text="UNAVAILABLE", state="disabled")
+            return
+
+        toggle_button.config(state="normal")
+
+        with acceptor.lock:
+            enabled = acceptor.enabled
+
+            if enabled and acceptor.pulse_active and acceptor.pulse_count > 0:
+                # This batch is still arriving; show a provisional estimate.
+                pulse_count = acceptor.pulse_count
+                value = acceptor.decoder(pulse_count)
+                is_live_preview = True
+            elif enabled:
+                # Show the most recently completed pulse batch.
+                pulse_count = acceptor.last_completed_pulses
+                value = acceptor.last_decoded_value
+                is_live_preview = False
+            else:
+                pulse_count = 0
+                value = None
+                is_live_preview = False
+
+        status_var.set("ON" if enabled else "OFF")
+        toggle_button.config(
+            text="DISABLE" if enabled else "ENABLE"
+        )
+
+        if not enabled:
+            pulses_var.set("Pulses: disabled")
+        elif value is None:
+            pulses_var.set("Pulses: 0 | Value: --")
+        elif is_live_preview and value > 0:
+            pulses_var.set(
+                f"Pulses: {pulse_count} | Preview: ₱{value}"
+            )
+        elif is_live_preview:
+            pulses_var.set(
+                f"Pulses: {pulse_count} | Preview: --"
+            )
+        elif value > 0:
+            pulses_var.set(
+                f"Pulses: {pulse_count} | Value: ₱{value}"
+            )
+        else:
+            pulses_var.set(
+                f"Pulses: {pulse_count} | Value: ₱0 / unrecognized"
+            )
+
+    def toggle_coin_acceptor(self):
+        self._toggle_acceptor("coin")
 
     def toggle_bill_acceptor(self):
-        self.controller.log("Maintenance: toggling bill acceptor")
+        self._toggle_acceptor("bill")
 
-        # Placeholder for the acceptor enable/disable logic.
+    def _toggle_acceptor(self, kind):
+        """Toggle one acceptor's software pulse reading."""
+        try:
+            hardware = getattr(self.controller, "hardware", None)
+            if hardware is None:
+                raise RuntimeError("Hardware manager is not available")
+
+            acceptor = getattr(hardware, f"{kind}_acceptor", None)
+            if acceptor is None:
+                raise RuntimeError(
+                    f"{kind.capitalize()} acceptor is not available"
+                )
+
+            new_state = not acceptor.enabled
+            acceptor.set_enabled(new_state)
+
+            # Update this acceptor's UI.
+            status_var = getattr(self, f"{kind}_status")
+            pulses_var = getattr(self, f"{kind}_pulses")
+            toggle_button = getattr(self, f"{kind}_toggle_button")
+
+            status_var.set("ON" if new_state else "OFF")
+            toggle_button.config(
+                text="DISABLE" if new_state else "ENABLE"
+            )
+
+            pulses_var.set(
+                "Pulses: 0 | Value: --"
+                if new_state
+                else "Pulses: disabled"
+            )
+
+            self.controller.log(
+                f"Maintenance: {kind} acceptor "
+                f"{'enabled' if new_state else 'disabled'}"
+            )
+
+        except Exception as e:
+            self.controller.log(
+                f"Maintenance: failed to toggle {kind} acceptor: {e}"
+            )
 
     def reset_coin_pulses(self):
         try:
@@ -2619,8 +2741,11 @@ class MaintenanceModeScreen(tk.Frame):
                 acceptor.last_pulse_time = 0.0
                 acceptor.first_pulse_time = 0.0
                 acceptor.pulse_active = False
+                acceptor.last_interrupt_time = 0.0
+                acceptor.last_completed_pulses = 0
+                acceptor.last_decoded_value = None
 
-            self.coin_pulses.set("Pulses: 0")
+            self.coin_pulses.set("Pulses: 0 | Value: --")
             self.controller.log("Maintenance: coin pulse counter reset")
 
         except Exception as e:
@@ -2637,8 +2762,11 @@ class MaintenanceModeScreen(tk.Frame):
                 acceptor.last_pulse_time = 0.0
                 acceptor.first_pulse_time = 0.0
                 acceptor.pulse_active = False
+                acceptor.last_interrupt_time = 0.0
+                acceptor.last_completed_pulses = 0
+                acceptor.last_decoded_value = None
 
-            self.bill_pulses.set("Pulses: 0")
+            self.bill_pulses.set("Pulses: 0 | Value: --")
             self.controller.log("Maintenance: bill pulse counter reset")
 
         except Exception as e:
@@ -2658,6 +2786,16 @@ class MaintenanceModeScreen(tk.Frame):
 
     def tkraise(self, *args, **kwargs):
         super().tkraise(*args, **kwargs)
+
+        # Sync displayed acceptor states and start pulse display updates.
+        if self._acceptor_refresh_job is not None:
+            try:
+                self.after_cancel(self._acceptor_refresh_job)
+            except Exception:
+                pass
+            self._acceptor_refresh_job = None
+
+        self._refresh_acceptor_display()
 
         try:
             self.controller.pause_inactivity()

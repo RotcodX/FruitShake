@@ -40,6 +40,9 @@ class MoneyPulseAcceptor:
         self.debug_cooldown = debug_cooldown
         self.process_delay = process_delay
         self.shared_processing_lock = shared_processing_lock
+        self.enabled = False
+        self.last_completed_pulses = 0 # Preserve the most recently completed pulse batch for the UI.
+        self.last_decoded_value = None
 
         self.pulse_count = 0
         self.last_pulse_time = 0.0
@@ -89,6 +92,29 @@ class MoneyPulseAcceptor:
         if self.shared_processing_lock is not None:
             self.shared_processing_lock["active"] = bool(active)
 
+    def set_enabled(self, enabled):
+        """Enable or disable this acceptor's software pulse reading."""
+        enabled = bool(enabled)
+
+        with self.lock:
+            self.enabled = enabled
+
+            # Clear any unfinished or previous reading.
+            self.pulse_count = 0
+            self.last_pulse_time = 0.0
+            self.last_interrupt_time = 0.0
+            self.pulse_active = False
+            self.first_pulse_time = 0.0
+            self.last_debug_log = 0.0
+
+            self.last_completed_pulses = 0
+            self.last_decoded_value = None
+
+        self.app.log(
+            f"{self.name}: pulse reading "
+            f"{'ENABLED' if enabled else 'DISABLED'}"
+        )
+
     def _on_pulse(self, channel):
         now = time.monotonic()
 
@@ -106,12 +132,20 @@ class MoneyPulseAcceptor:
             return
 
         with self.lock:
-            if self.last_interrupt_time and (now - self.last_interrupt_time) < self.debounce:
+            if not self.enabled:
+                return
+
+            if self.last_interrupt_time and (
+                now - self.last_interrupt_time
+            ) < self.debounce:
                 return
 
             if self.pulse_count == 0:
                 self.first_pulse_time = now
-                self.app.after(0, lambda: self.app.set_cash_indicator(True))
+                self.app.after(
+                    0,
+                    lambda: self.app.set_cash_indicator(True)
+                )
                 print(f"{self.name}: signal detected")
 
             self.pulse_count += 1
@@ -147,9 +181,14 @@ class MoneyPulseAcceptor:
         self._debug_status(now)
 
         with self.lock:
+            enabled = self.enabled
             pulse_active = self.pulse_active
             last_time = self.last_pulse_time
             pulses = self.pulse_count
+
+        if not enabled:
+            self.app.after(100, self._poll_finalize)
+            return
 
         should_finalize = (
             pulse_active
@@ -177,13 +216,24 @@ class MoneyPulseAcceptor:
 
         value = self.decoder(pulses)
 
+        with self.lock:
+            self.last_completed_pulses = pulses
+            self.last_decoded_value = value
+
         if value > 0:
             if pulses == 1 and not self.accept_one_pulse:
                 print(f"{self.name}: rejected 1-pulse value for stability")
                 self.app.after(0, lambda: self.app.set_cash_indicator(False))
             else:
                 print(f"{self.name}: {pulses} pulse(s) -> ₱{value}")
-                self.app.queue_cash(value)
+                # Maintenance Mode may inspect pulses without accepting payment.
+                if getattr(self.app, "accept_cash_input", False):
+                    self.app.queue_cash(value)
+                else:
+                    print(
+                        f"{self.name}: preview only - "
+                        f"{pulses} pulses -> ₱{value}"
+                    )
                 self.app.after(0, lambda: self.app.set_cash_indicator(False))
         else:
             print(f"{self.name}: invalid pulse count {pulses}, ignored")
@@ -218,8 +268,11 @@ class RelayController:
         GPIO.setmode(GPIO.BCM)
 
         for pin in self.pins:
-            GPIO.setup(pin, GPIO.OUT)
-            GPIO.output(pin, GPIO.HIGH)  # OFF (active LOW)
+            GPIO.setup(
+                pin,
+                GPIO.OUT,
+                initial=GPIO.HIGH
+            )  # 1 / HIGH = OFF (active LOW relay)
 
     def all_on(self):
         for pin in self.pins:
