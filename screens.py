@@ -2187,7 +2187,6 @@ class ErrorScreen(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
-        self._acceptor_refresh_job = None
 
         # Canvas / background (keep touch feedback binding)
         self.canvas = tk.Canvas(self, width=SCREEN_W, height=SCREEN_H, highlightthickness=0)
@@ -2262,6 +2261,7 @@ class MaintenanceModeScreen(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg="#222")
         self.controller = controller
+        self._acceptor_refresh_job = None
 
         # -------------------------------------------------
         # Settings

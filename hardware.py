@@ -309,7 +309,15 @@ class MachineController:
 
         # Servo tuning
         self.servo_run_value = 1.0
-        self.servo_stop_value = None
+
+        # Calibrated neutral value for each continuous-rotation servo.
+        # Start at 0.00, then adjust each one individually if necessary.
+        self.servo_stop_values = {
+            "servo1": 0.00,
+            "servo2": 0.00,
+            "servo3": 0.00,
+            "servo4": 0.00,
+        }
         
     # 1
     def dispense_cup(self, seconds):
@@ -334,37 +342,71 @@ class MachineController:
     # 5
     def dispense_addons(self, seconds):
         print(f"Dispensing Add-Ons for {seconds}s.")
-        self.run_servo_for_time(self.hardware.servo1, seconds, direction=1)
+        self.run_servo_for_time(self.hardware.servo1,seconds, direction=self.servo_run_value, stop_value=self.servo_stop_values["servo1"])
 
     # 6
     def run_blender(self, seconds):
         print(f"Blending for {seconds}s.")
-        self.run_servo_for_time(self.hardware.servo2, seconds, direction=1)
+        self.run_servo_for_time(self.hardware.servo2, seconds, direction=self.servo_run_value, stop_value=self.servo_stop_values["servo2"])
 
     # 7
     def dispense_order(self, seconds):
         print(f"Dispensing order for {seconds}s.")
-        self.run_servo_for_time(self.hardware.servo3, seconds, direction=1)
+        self.run_servo_for_time(self.hardware.servo3, seconds, direction=self.servo_run_value, stop_value=self.servo_stop_values["servo3"])
 
     # 8
     def cleaning(self, seconds):
         print(f"Cleaning up for {seconds}s.")
-        self.run_servo_for_time(self.hardware.servo4, seconds, direction=1)
+        self.run_servo_for_time(self.hardware.servo4, seconds, direction=self.servo_run_value, stop_value=self.servo_stop_values["servo4"])
 
     def cleanup(self):
+        # Stop and close each servo using its own neutral setting.
+        for name, servo in (
+            ("servo1", self.hardware.servo1),
+            ("servo2", self.hardware.servo2),
+            ("servo3", self.hardware.servo3),
+            ("servo4", self.hardware.servo4),
+        ):
+            try:
+                servo.value = self.servo_stop_values[name]
+                time.sleep(0.2)
+            except Exception as e:
+                print(f"Could not stop {name}: {e}")
+
+            try:
+                servo.close()
+            except Exception as e:
+                print(f"Could not close {name}: {e}")
+
+        # Switch relays off and clean up GPIO.
         self.relays.cleanup()
 
     def run_servo_for_time(self, servo, seconds, direction=None):
         if direction is None:
             direction = self.servo_run_value
 
-        # force stop first
+        # Detach any previous control signal before starting.
         servo.value = None
-        # run
-        servo.value = direction
-        time.sleep(seconds)
-        # stop again
-        servo.value = None
+
+        try:
+            # Start the servo.
+            servo.value = direction
+            print(f"Servo running for {seconds} seconds.")
+
+            time.sleep(seconds)
+
+        finally:
+            # Stop attempt 1: briefly command the midpoint.
+            print("Servo stop attempt 1: sending neutral command.")
+
+            try:
+                servo.value = self.servo_stop_value
+                time.sleep(0.2)
+
+            finally:
+                # Stop attempt 2: detach the control signal.
+                servo.value = None
+                print("Servo stop attempt 2: control signal detached.")
 
     # Maintenance Mode tests
 
@@ -394,35 +436,19 @@ class MachineController:
 
     def test_servo1(self, seconds):
         print(f"Maintenance: Servo 1 for {seconds}s")
-        self.run_servo_for_time(
-            self.hardware.servo1,
-            seconds,
-            direction=self.servo_run_value
-        )
+        self.run_servo_for_time(self.hardware.servo1,seconds, direction=self.servo_run_value, stop_value=self.servo_stop_values["servo1"])
 
     def test_servo2(self, seconds):
         print(f"Maintenance: Servo 2 for {seconds}s")
-        self.run_servo_for_time(
-            self.hardware.servo2,
-            seconds,
-            direction=self.servo_run_value
-        )
+        self.run_servo_for_time(self.hardware.servo2,seconds, direction=self.servo_run_value, stop_value=self.servo_stop_values["servo2"])
 
     def test_servo3(self, seconds):
         print(f"Maintenance: Servo 3 for {seconds}s")
-        self.run_servo_for_time(
-            self.hardware.servo3,
-            seconds,
-            direction=self.servo_run_value
-        )
+        self.run_servo_for_time(self.hardware.servo3,seconds, direction=self.servo_run_value, stop_value=self.servo_stop_values["servo3"])
 
     def test_servo4(self, seconds):
         print(f"Maintenance: Servo 4 for {seconds}s")
-        self.run_servo_for_time(
-            self.hardware.servo4,
-            seconds,
-            direction=self.servo_run_value
-        )
+        self.run_servo_for_time(self.hardware.servo4, seconds, direction=self.servo_run_value, stop_value=self.servo_stop_values["servo4"])
 
 class HardwareManager:
     def __init__(self, app):

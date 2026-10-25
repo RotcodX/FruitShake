@@ -879,6 +879,26 @@ class App(tk.Tk):
 
         # Enable hardware cash input only on CashMethodScreen.
         self.accept_cash_input = (cls is CashMethodScreen)
+        # Decide whether the coin and bill acceptors should read pulses.
+        # Maintenance Mode manages these states using its own buttons.
+        if getattr(self, "hardware", None) is not None:
+            if cls is CashMethodScreen:
+                acceptors_enabled = True
+            elif cls is MaintenanceModeScreen:
+                # Preserve the state selected in Maintenance Mode.
+                acceptors_enabled = None
+            else:
+                acceptors_enabled = False
+
+            if acceptors_enabled is not None:
+                for kind in ("coin", "bill"):
+                    acceptor = getattr(
+                        self.hardware,
+                        f"{kind}_acceptor",
+                        None
+                    )
+                    if acceptor is not None:
+                        acceptor.set_enabled(acceptors_enabled)
 
         if cls is ProcessingScreen:
             self.processing_lock = True
