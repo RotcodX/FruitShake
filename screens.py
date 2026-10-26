@@ -2333,11 +2333,79 @@ class MaintenanceModeScreen(tk.Frame):
         ).pack(side="left")
 
         # -------------------------------------------------
+        # Fixed bottom navigation
+        # -------------------------------------------------
+        bottom_frame = tk.Frame(self.main_frame, bg="#222")
+        bottom_frame.pack(side="bottom", fill="x", pady=(2, 0))
+
+        tk.Button(
+            bottom_frame,
+            text="BACK",
+            width=12,
+            command=self.go_back
+        ).pack(side="left")
+
+        # -------------------------------------------------
+        # Scrollable hardware controls
+        # -------------------------------------------------
+        scroll_area = tk.Frame(self.main_frame, bg="#222")
+        scroll_area.pack(fill="both", expand=True)
+
+        self.maintenance_canvas = tk.Canvas(
+            scroll_area,
+            bg="#222",
+            highlightthickness=0
+        )
+
+        self.maintenance_scrollbar = tk.Scrollbar(
+            scroll_area,
+            orient="vertical",
+            command=self.maintenance_canvas.yview,
+            width=18
+        )
+
+        self.maintenance_canvas.configure(
+            yscrollcommand=self.maintenance_scrollbar.set
+        )
+
+        self.maintenance_canvas.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        self.maintenance_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.content_frame = tk.Frame(
+            self.maintenance_canvas,
+            bg="#222"
+        )
+
+        self._maintenance_window = self.maintenance_canvas.create_window(
+            (0, 0),
+            window=self.content_frame,
+            anchor="nw"
+        )
+
+        self.content_frame.bind(
+            "<Configure>",
+            self._update_maintenance_scrollregion
+        )
+
+        self.maintenance_canvas.bind(
+            "<Configure>",
+            self._resize_maintenance_content
+        )
+
+        # -------------------------------------------------
         # Pumps
         # -------------------------------------------------
         self._add_section_title("RELAY")
 
-        pumps_frame = tk.Frame(self.main_frame, bg="#222")
+        pumps_frame = tk.Frame(self.content_frame, bg="#222")
         pumps_frame.pack(fill="x", pady=(0, 6))
 
         self._add_test_button(
@@ -2384,32 +2452,32 @@ class MaintenanceModeScreen(tk.Frame):
         # -------------------------------------------------
         self._add_section_title("SERVOS")
 
-        servos_frame = tk.Frame(self.main_frame, bg="#222")
+        servos_frame = tk.Frame(self.content_frame, bg="#222")
         servos_frame.pack(fill="x", pady=(0, 6))
 
         self._add_test_button(
             servos_frame,
             "SERVO 1",
             lambda: self._run_test("servo1")
-        ).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+        ).grid(row=0, column=0, padx=2, pady=1, sticky="ew")
 
         self._add_test_button(
             servos_frame,
             "SERVO 2",
             lambda: self._run_test("servo2")
-        ).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+        ).grid(row=0, column=1, padx=2, pady=1, sticky="ew")
 
         self._add_test_button(
             servos_frame,
             "SERVO 3",
             lambda: self._run_test("servo3")
-        ).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
+        ).grid(row=1, column=0, padx=2, pady=1, sticky="ew")
 
         self._add_test_button(
             servos_frame,
             "SERVO 4",
             lambda: self._run_test("servo4")
-        ).grid(row=1, column=1, padx=2, pady=2, sticky="ew")
+        ).grid(row=1, column=1, padx=2, pady=1, sticky="ew")
 
         servos_frame.grid_columnconfigure(0, weight=1)
         servos_frame.grid_columnconfigure(1, weight=1)
@@ -2419,7 +2487,7 @@ class MaintenanceModeScreen(tk.Frame):
         # -------------------------------------------------
         self._add_section_title("CASH ACCEPTORS")
 
-        cash_frame = tk.Frame(self.main_frame, bg="#222")
+        cash_frame = tk.Frame(self.content_frame, bg="#222")
         cash_frame.pack(fill="x", pady=(0, 6))
 
         # Coin
@@ -2456,7 +2524,7 @@ class MaintenanceModeScreen(tk.Frame):
         # -------------------------------------------------
         # Bottom buttons
         # -------------------------------------------------
-        bottom_frame = tk.Frame(self.main_frame, bg="#222")
+        bottom_frame = tk.Frame(self.content_frame, bg="#222")
         bottom_frame.pack(fill="x", side="bottom", pady=(4, 0))
 
         tk.Button(
@@ -2466,13 +2534,54 @@ class MaintenanceModeScreen(tk.Frame):
             command=self.go_back
         ).pack(side="left")
 
+        self._bind_maintenance_scroll_events(self.content_frame)
+
     # =====================================================
     # UI helpers
     # =====================================================
 
+    def _update_maintenance_scrollregion(self, event=None):
+        self.maintenance_canvas.configure(
+            scrollregion=self.maintenance_canvas.bbox("all")
+        )
+
+    def _resize_maintenance_content(self, event):
+        self.maintenance_canvas.itemconfigure(
+            self._maintenance_window,
+            width=event.width
+        )
+
+    def _on_maintenance_mousewheel(self, event):
+        if getattr(event, "num", None) == 4:
+            units = -1
+        elif getattr(event, "num", None) == 5:
+            units = 1
+        else:
+            units = -1 if event.delta > 0 else 1
+
+        self.maintenance_canvas.yview_scroll(units, "units")
+        return "break"
+
+    def _bind_maintenance_scroll_events(self, widget):
+        widget.bind(
+            "<MouseWheel>",
+            self._on_maintenance_mousewheel
+        )
+        widget.bind(
+            "<Button-4>",
+            self._on_maintenance_mousewheel
+        )
+        widget.bind(
+            "<Button-5>",
+            self._on_maintenance_mousewheel
+        )
+
+        for child in widget.winfo_children():
+            self._bind_maintenance_scroll_events(child)
+
     def _add_section_title(self, text):
         label = tk.Label(
-            self.main_frame,
+            self.content_frame,
             text=text,
             font=("Arial", 11, "bold"),
             bg="#333",
@@ -2485,7 +2594,7 @@ class MaintenanceModeScreen(tk.Frame):
         return tk.Button(
             parent,
             text=text,
-            height=2,
+            height=1,
             command=command
         )
 
@@ -2504,7 +2613,7 @@ class MaintenanceModeScreen(tk.Frame):
             row=0,
             column=column,
             padx=2,
-            pady=2,
+            pady=1,
             sticky="ew"
         )
 

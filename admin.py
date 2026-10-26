@@ -43,9 +43,9 @@ class AdminPanel(tk.Frame):
         network_frame = tk.Frame(self, bg="#222")
         network_frame.place(
             x=10,
-            y=self.panel_height - 90,
-            relwidth=0.75,
-            height=40
+            y=30,
+            relwidth=0.98,
+            height=35
         )
 
         self.internet_status_label = tk.Label(
@@ -125,12 +125,74 @@ class AdminPanel(tk.Frame):
             self._check_machine_btn = None
             self._maintenance_btn = None
 
-        # Rows area
-        rows_top = 0.075 if self.show_recheck_stock else 0.03
-        rows_height = 0.83 if self.show_recheck_stock else 0.90
+        # -------------------------------------------------
+        # Scrollable rows area
+        # -------------------------------------------------
+        rows_top_px = 70
+        rows_bottom_reserved_px = 45
+
         rows_frame = tk.Frame(self, bg="#222")
-        rows_frame.place(relx=0.5, rely=rows_top, anchor="n", relwidth=0.98, relheight=rows_height)
-        self.admin_rows_parent = rows_frame
+        rows_frame.place(
+            relx=0.5,
+            y=rows_top_px,
+            anchor="n",
+            relwidth=0.98,
+            height=max(
+                120,
+                self.panel_height
+                - rows_top_px
+                - rows_bottom_reserved_px
+            )
+        )
+
+        self.admin_rows_canvas = tk.Canvas(
+            rows_frame,
+            bg="#222",
+            highlightthickness=0
+        )
+
+        self.admin_rows_scrollbar = tk.Scrollbar(
+            rows_frame,
+            orient="vertical",
+            command=self.admin_rows_canvas.yview,
+            width=18
+        )
+
+        self.admin_rows_canvas.configure(
+            yscrollcommand=self.admin_rows_scrollbar.set
+        )
+
+        self.admin_rows_canvas.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        self.admin_rows_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.admin_rows_parent = tk.Frame(
+            self.admin_rows_canvas,
+            bg="#222"
+        )
+
+        self._admin_rows_window = self.admin_rows_canvas.create_window(
+            (0, 0),
+            window=self.admin_rows_parent,
+            anchor="nw"
+        )
+
+        self.admin_rows_parent.bind(
+            "<Configure>",
+            self._update_admin_rows_scrollregion
+        )
+
+        self.admin_rows_canvas.bind(
+            "<Configure>",
+            self._resize_admin_rows_content
+        )
 
         self.refresh()
 
@@ -223,7 +285,7 @@ class AdminPanel(tk.Frame):
         # Fruits
         for key, meta in getattr(self.controller, "catalog", {}).items():
             row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=2)
+            row.pack(fill="x", pady=1)
 
             tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
 
@@ -250,7 +312,7 @@ class AdminPanel(tk.Frame):
 
         for key, meta in getattr(self.controller, "addons", {}).items():
             row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=2)
+            row.pack(fill="x", pady=1)
 
             tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
 
@@ -274,7 +336,7 @@ class AdminPanel(tk.Frame):
 
         for key, meta in getattr(self.controller, "ingredients", {}).items():
             row = tk.Frame(parent, bg="#222")
-            row.pack(fill="x", pady=2)
+            row.pack(fill="x", pady=1)
 
             tk.Label(row, text=meta.get("name", key), width=20, anchor="w", bg="#222", fg="white").pack(side="left", padx=4)
 
@@ -302,6 +364,47 @@ class AdminPanel(tk.Frame):
         ).pack(side="left", padx=4)
 
         tk.Button(income_row, text="Reset Income", command=self._reset_income, width=12).pack(side="left", padx=6)
+
+        self._bind_admin_scroll_events(self.admin_rows_parent)
+
+    def _update_admin_rows_scrollregion(self, event=None):
+        self.admin_rows_canvas.configure(
+            scrollregion=self.admin_rows_canvas.bbox("all")
+        )
+
+    def _resize_admin_rows_content(self, event):
+        self.admin_rows_canvas.itemconfigure(
+            self._admin_rows_window,
+            width=event.width
+        )
+
+    def _on_admin_rows_mousewheel(self, event):
+        if getattr(event, "num", None) == 4:
+            units = -1
+        elif getattr(event, "num", None) == 5:
+            units = 1
+        else:
+            units = -1 if event.delta > 0 else 1
+
+        self.admin_rows_canvas.yview_scroll(units, "units")
+        return "break"
+
+    def _bind_admin_scroll_events(self, widget):
+        widget.bind(
+            "<MouseWheel>",
+            self._on_admin_rows_mousewheel
+        )
+        widget.bind(
+            "<Button-4>",
+            self._on_admin_rows_mousewheel
+        )
+        widget.bind(
+            "<Button-5>",
+            self._on_admin_rows_mousewheel
+        )
+
+        for child in widget.winfo_children():
+            self._bind_admin_scroll_events(child)
 
     def _refresh_fruit_screen(self):
         fs = self.controller.frames.get(self.fruit_screen_cls)
