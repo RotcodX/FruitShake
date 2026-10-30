@@ -146,7 +146,10 @@ class MoneyPulseAcceptor:
                     0,
                     lambda: self.app.set_cash_indicator(True)
                 )
-                print(f"{self.name}: signal detected")
+                print(
+                    f"{self.name} (BCM GPIO {self.pin}): "
+                    f"first pulse detected"
+                )
 
             self.pulse_count += 1
             self.last_pulse_time = now
@@ -204,15 +207,34 @@ class MoneyPulseAcceptor:
 
         with self.lock:
             pulses = self.pulse_count
+            first_pulse_time = self.first_pulse_time
             self.pulse_count = 0
             self.last_pulse_time = 0.0
             self.last_interrupt_time = 0.0
             self.pulse_active = False
+            
             self.first_pulse_time = 0.0
             self.last_debug_log = 0.0
             self.processing_until = time.monotonic() + self.process_delay
 
-        print(f"{self.name}: FINALIZING with {pulses} pulses")
+        batch_duration = (
+            time.monotonic() - first_pulse_time
+            if first_pulse_time
+            else 0.0
+        )
+
+        quiet_duration = (
+            time.monotonic() - last_time
+            if last_time
+            else 0.0
+        )
+
+        print(
+            f"{self.name} (BCM GPIO {self.pin}): "
+            f"FINALIZING with {pulses} pulses | "
+            f"batch duration: {batch_duration:.2f}s | "
+            f"quiet duration: {quiet_duration:.2f}s"
+        )
 
         value = self.decoder(pulses)
 
