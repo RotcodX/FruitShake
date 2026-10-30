@@ -169,12 +169,12 @@ class MoneyPulseAcceptor:
         age_since_last = (now - last_time) if last_time else 0
         age_since_first = (now - first_time) if first_time else 0
 
-        """ self.app.log(
+        self.app.log(
             f"{self.name}: STATUS active={active}, "
             f"pulses={pulses}, "
             f"since_last={age_since_last:.2f}s, "
             f"since_first={age_since_first:.2f}s"
-        ) """
+        )
 
         self.last_status_log = now
 
