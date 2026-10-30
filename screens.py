@@ -951,7 +951,7 @@ class PaymentSelectionScreen(tk.Frame):
             return
 
         self.controller.log("PayPal selected")
-        self.controller.show_frame(PaypalMethodScreen, timeout_ms=self.controller.default_timeout_ms * 10)
+        self.controller.show_frame(PaypalMethodScreen, timeout_ms=self.controller.default_timeout_ms * 999)
 
     def update_online_state(self):
         online = self.controller.effective_online

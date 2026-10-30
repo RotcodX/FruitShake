@@ -39,5 +39,9 @@ Used GPIO Pins:
 
 Machine Process:
 - screens.py _machine_worker()
+
+Test Notes:
+- Set `self.controller.show_frame(PaypalMethodScreen, timeout_ms=self.controller.default_timeout_ms * 999)` back to 10 after testing PayPal payment.
+- 
 """
 #endregion

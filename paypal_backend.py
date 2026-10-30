@@ -14,13 +14,62 @@ from flask import Flask, jsonify, request
 
 load_dotenv()
 
-# PayPal sandbox by default.
-# Change to https://api-m.paypal.com only when you are ready for live mode.
-PAYPAL_BASE = os.getenv("PAYPAL_BASE", "https://api-m.sandbox.paypal.com")
+# -------------------------
+# PayPal environment/config
+# -------------------------
+PAYPAL_MODE = os.getenv("PAYPAL_MODE", "sandbox").strip().lower()
 
-PAYPAL_CLIENT_ID = os.environ["PAYPAL_CLIENT_ID"]
-PAYPAL_CLIENT_SECRET = os.environ["PAYPAL_CLIENT_SECRET"]
-PAYPAL_WEBHOOK_ID = os.environ["PAYPAL_WEBHOOK_ID"]
+if PAYPAL_MODE not in {"sandbox", "live"}:
+    raise ValueError(
+        "PAYPAL_MODE must be either 'sandbox' or 'live'."
+    )
+
+if PAYPAL_MODE == "sandbox":
+    PAYPAL_BASE = "https://api-m.sandbox.paypal.com"
+
+    # Existing Sandbox credentials
+    PAYPAL_CLIENT_ID = (
+        os.getenv("PAYPAL_SANDBOX_CLIENT_ID")
+        or os.getenv("PAYPAL_CLIENT_ID", "")
+    ).strip()
+
+    PAYPAL_CLIENT_SECRET = (
+        os.getenv("PAYPAL_SANDBOX_CLIENT_SECRET")
+        or os.getenv("PAYPAL_CLIENT_SECRET", "")
+    ).strip()
+
+    PAYPAL_WEBHOOK_ID = (
+        os.getenv("PAYPAL_SANDBOX_WEBHOOK_ID")
+        or os.getenv("PAYPAL_WEBHOOK_ID", "")
+    ).strip()
+
+else:
+    PAYPAL_BASE = "https://api-m.paypal.com"
+
+    PAYPAL_CLIENT_ID = os.getenv(
+        "PAYPAL_LIVE_CLIENT_ID", ""
+    ).strip()
+
+    PAYPAL_CLIENT_SECRET = os.getenv(
+        "PAYPAL_LIVE_CLIENT_SECRET", ""
+    ).strip()
+
+    PAYPAL_WEBHOOK_ID = os.getenv(
+        "PAYPAL_LIVE_WEBHOOK_ID", ""
+    ).strip()
+
+if not PAYPAL_CLIENT_ID or not PAYPAL_CLIENT_SECRET:
+    raise RuntimeError(
+        f"Missing PayPal credentials for {PAYPAL_MODE} mode."
+    )
+
+if not PAYPAL_WEBHOOK_ID:
+    raise RuntimeError(
+        f"Missing PayPal webhook ID for {PAYPAL_MODE} mode."
+    )
+
+print(f"PayPal backend mode: {PAYPAL_MODE}")
+
 
 # Optional defaults
 DEFAULT_CURRENCY = os.getenv("PAYPAL_CURRENCY", "PHP")
@@ -313,4 +362,4 @@ def debug_orders():
 """
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000, debug=True)
+    app.run(host="0.0.0.0", port=3000, debug=False)
