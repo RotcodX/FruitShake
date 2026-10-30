@@ -73,7 +73,7 @@ class App(tk.Tk):
         # Simple UI mode:
         # True  = use text-only loading/processing indicators
         # False = use normal GIF/progress UI
-        self.simpleUI = True
+        self.simpleUI = False
 
         self.touch_feedback = TouchFeedbackManager(self)
         self.supabase = create_client(url, key)
@@ -879,6 +879,46 @@ class App(tk.Tk):
 
         # Enable hardware cash input only on CashMethodScreen.
         self.accept_cash_input = (cls is CashMethodScreen)
+        # Automatically manage cash acceptor pulse reading.
+        hardware = getattr(self, "hardware", None)
+
+        if hardware is not None:
+
+            if cls is CashMethodScreen:
+                # Customer payment: enable both acceptors.
+                acceptors_should_be_enabled = True
+
+            elif cls is MaintenanceModeScreen:
+                # Maintenance: leave the individual buttons
+                # in control of the acceptors.
+                acceptors_should_be_enabled = None
+
+            else:
+                # Every other screen: disable both acceptors.
+                acceptors_should_be_enabled = False
+
+            if acceptors_should_be_enabled is not None:
+
+                for kind in ("coin", "bill"):
+                    acceptor = getattr(
+                        hardware,
+                        f"{kind}_acceptor",
+                        None
+                    )
+
+                    if (
+                        acceptor is not None
+                        and acceptor.enabled != acceptors_should_be_enabled
+                    ):
+                        try:
+                            acceptor.set_enabled(
+                                acceptors_should_be_enabled
+                            )
+
+                        except Exception as e:
+                            self.log(
+                                f"Failed to update {kind} acceptor state: {e}"
+                            )
         # Decide whether the coin and bill acceptors should read pulses.
         # Maintenance Mode manages these states using its own buttons.
         if getattr(self, "hardware", None) is not None:

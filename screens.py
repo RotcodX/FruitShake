@@ -677,9 +677,34 @@ class AddOnScreen(tk.Frame):
         # tag name used for selection highlight overlays
         self.sel_overlay_tag = "addon_sel_overlay"
 
+        # Images displayed when an addon is selected
+        self._addon_select_cache = {}
+
+        # Images displayed when an addon is out of stock
         self._addon_overlay_cache = {}
         self._addon_overlay_items = {}
         self.addon_stock_overlay_tag = "addon_stock_overlay"
+
+        # Preload addon selection overlays
+        for key, fname in (
+            ("pearls", "blackPearlSelect.png"),
+            ("cheese", "cheeseSelect.png")
+        ):
+            try:
+                if file_exists(fname):
+                    path = os.path.join(ASSETS_DIR, fname)
+
+                    with Image.open(path) as img:
+                        photo = ImageTk.PhotoImage(img.convert("RGBA"))
+
+                    self._addon_select_cache[key] = photo
+                else:
+                    self.controller.log(f"Missing addon selection overlay: {fname}")
+
+            except Exception as e:
+                self.controller.log(
+                    f"Addon selection overlay preload error ({fname}): {e}"
+                )
 
         try:
             for key, asset_base in (("pearls", "pearls"), ("cheese", "cheese")):
@@ -749,20 +774,29 @@ class AddOnScreen(tk.Frame):
                         pass
                     self._addon_overlay_items.setdefault(key, []).append(item)
 
-            # selected outline
+            # selected image overlay
             if key in self.controller.selected_addons:
-                inset = 4
-                sx1, sy1, sx2, sy2 = x1 + inset, y1 + inset, x2 - inset, y2 - inset
-                sel_id = self.canvas.create_rectangle(
-                    sx1, sy1, sx2, sy2,
-                    outline="yellow", width=4,
-                    tags=(self.sel_overlay_tag,)
-                )
-                try:
-                    if zone_id:
-                        self.canvas.tag_lower(sel_id, zone_id)
-                except Exception:
-                    pass
+                photo = self._addon_select_cache.get(key)
+
+                if photo is not None:
+                    sel_id = self.canvas.create_image(
+                        0, 0,
+                        anchor="nw",
+                        image=photo,
+                        tags=(self.sel_overlay_tag,)
+                    )
+
+                    # Keep the overlay from interfering with the touch zone
+                    try:
+                        self.canvas.itemconfigure(sel_id, state="disabled")
+
+                        if zone_id:
+                            self.canvas.tag_lower(sel_id, zone_id)
+
+                    except Exception as e:
+                        self.controller.log(
+                            f"Addon selection overlay positioning error ({key}): {e}"
+                        )
 
     def render_summary(self):
         parts = []

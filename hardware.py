@@ -13,6 +13,8 @@ try:
 except ImportError:
     Button = Servo = OutputDevice = None
 
+DEBUG_CASH_PULSES = False
+
 class MoneyPulseAcceptor:
     def __init__(
         self,
@@ -57,31 +59,24 @@ class MoneyPulseAcceptor:
 
         self.lock = threading.Lock()
 
-        self.app.log(f"{self.name}: initializing on GPIO {pin}")
+        # Track whether GPIO edge detection is currently registered.
+        self._edge_detection_enabled = False
+
+        # Track the scheduled pulse-finalization callback.
+        self._poll_job = None
+
+        self.app.log(
+            f"{self.name}: initializing on GPIO {pin} "
+            "(pulse reading initially disabled)"
+        )
 
         GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
+        # Make sure no previous event detection is registered.
         try:
             GPIO.remove_event_detect(pin)
         except Exception:
             pass
-
-        try:
-            GPIO.add_event_detect(
-                pin,
-                GPIO.FALLING,
-                callback=self._on_pulse,
-                bouncetime=bouncetime
-            )
-            self.app.log(
-                f"{self.name}: edge detection enabled on GPIO {pin} "
-                f"(timeout={timeout}, debounce={debounce}, bouncetime={bouncetime})"
-            )
-        except Exception as e:
-            self.app.log(f"{self.name}: failed to enable edge detection on GPIO {pin}: {e}")
-            raise
-
-        self.app.after(100, self._poll_finalize)
 
     def _shared_processing_active(self):
         if self.shared_processing_lock is None:
@@ -92,28 +87,86 @@ class MoneyPulseAcceptor:
         if self.shared_processing_lock is not None:
             self.shared_processing_lock["active"] = bool(active)
 
+    def _schedule_poll_finalize(self):
+        """Schedule pulse finalization only while this acceptor is enabled."""
+        if self.enabled and self._poll_job is None:
+            self._poll_job = self.app.after(
+                100,
+                self._poll_finalize
+            )
+
     def set_enabled(self, enabled):
-        """Enable or disable this acceptor's software pulse reading."""
+        """Enable or disable GPIO pulse detection and processing."""
         enabled = bool(enabled)
 
         with self.lock:
+            state_changed = self.enabled != enabled
             self.enabled = enabled
 
-            # Clear any unfinished or previous reading.
-            self.pulse_count = 0
-            self.last_pulse_time = 0.0
-            self.last_interrupt_time = 0.0
-            self.pulse_active = False
-            self.first_pulse_time = 0.0
-            self.last_debug_log = 0.0
+            if state_changed:
+                # Clear any unfinished or previous reading.
+                self.pulse_count = 0
+                self.last_pulse_time = 0.0
+                self.last_interrupt_time = 0.0
+                self.pulse_active = False
+                self.first_pulse_time = 0.0
+                self.last_debug_log = 0.0
+                self.last_status_log = 0.0
+                self.processing_until = 0.0
 
-            self.last_completed_pulses = 0
-            self.last_decoded_value = None
+                self.last_completed_pulses = 0
+                self.last_decoded_value = None
 
-        self.app.log(
-            f"{self.name}: pulse reading "
-            f"{'ENABLED' if enabled else 'DISABLED'}"
-        )
+        if enabled:
+            # Register GPIO pulse detection only when needed.
+            if not self._edge_detection_enabled:
+                try:
+                    GPIO.add_event_detect(
+                        self.pin,
+                        GPIO.FALLING,
+                        callback=self._on_pulse,
+                        bouncetime=self.bouncetime
+                    )
+
+                    self._edge_detection_enabled = True
+
+                except Exception:
+                    with self.lock:
+                        self.enabled = False
+                    raise
+
+            # Start the finalization loop.
+            self._schedule_poll_finalize()
+
+        else:
+            # Stop receiving GPIO callbacks.
+            if self._edge_detection_enabled:
+                try:
+                    GPIO.remove_event_detect(self.pin)
+
+                except Exception as e:
+                    self.app.log(
+                        f"{self.name}: failed to remove GPIO event detection: {e}"
+                    )
+
+                finally:
+                    self._edge_detection_enabled = False
+
+            # Cancel any scheduled finalization callback.
+            if self._poll_job is not None:
+                try:
+                    self.app.after_cancel(self._poll_job)
+                except Exception:
+                    pass
+
+                self._poll_job = None
+
+        # Only log actual state changes.
+        if state_changed:
+            self.app.log(
+                f"{self.name}: pulse reading "
+                f"{'ENABLED' if enabled else 'DISABLED'}"
+            )
 
     def _on_pulse(self, channel):
         now = time.monotonic()
@@ -169,19 +222,19 @@ class MoneyPulseAcceptor:
         age_since_last = (now - last_time) if last_time else 0
         age_since_first = (now - first_time) if first_time else 0
 
-        self.app.log(
+        """ self.app.log(
             f"{self.name}: STATUS active={active}, "
             f"pulses={pulses}, "
             f"since_last={age_since_last:.2f}s, "
             f"since_first={age_since_first:.2f}s"
-        )
+        ) """
 
         self.last_status_log = now
 
     def _poll_finalize(self):
-        now = time.monotonic()
+        self._poll_job = None
 
-        self._debug_status(now)
+        now = time.monotonic()
 
         with self.lock:
             enabled = self.enabled
@@ -189,9 +242,13 @@ class MoneyPulseAcceptor:
             last_time = self.last_pulse_time
             pulses = self.pulse_count
 
+        # Do not perform debugging or finalization while disabled.
         if not enabled:
-            self.app.after(100, self._poll_finalize)
             return
+
+        # Optional pulse debugging.
+        # Uncomment temporarily when investigating acceptor behavior.
+        # self._debug_status(now)
 
         should_finalize = (
             pulse_active
@@ -200,7 +257,7 @@ class MoneyPulseAcceptor:
         )
 
         if not should_finalize:
-            self.app.after(100, self._poll_finalize)
+            self._schedule_poll_finalize()
             return
         
         self._set_shared_processing(True)
@@ -229,12 +286,13 @@ class MoneyPulseAcceptor:
             else 0.0
         )
 
-        print(
-            f"{self.name} (BCM GPIO {self.pin}): "
-            f"FINALIZING with {pulses} pulses | "
-            f"batch duration: {batch_duration:.2f}s | "
-            f"quiet duration: {quiet_duration:.2f}s"
-        )
+        if DEBUG_CASH_PULSES:
+            print(
+                f"{self.name} (BCM GPIO {self.pin}): "
+                f"FINALIZING with {pulses} pulses | "
+                f"batch duration: {batch_duration:.2f}s | "
+                f"quiet duration: {quiet_duration:.2f}s"
+            )
 
         value = self.decoder(pulses)
 
@@ -264,7 +322,7 @@ class MoneyPulseAcceptor:
             self._set_shared_processing(False)
 
         self.app.after(int(self.process_delay * 1000), unlock_processing)
-        self.app.after(100, self._poll_finalize)
+        self._schedule_poll_finalize()
  
 def decode_coin(pulses):
     if 1 <= pulses <= 3:
